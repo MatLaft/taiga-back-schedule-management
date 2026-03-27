@@ -20,7 +20,7 @@ RUN set -eux; \
        git net-tools procps wget; \
     dpkgArch="$(dpkg --print-architecture | awk -F- '{ print $NF }')"; \
     wget -O /usr/local/bin/gosu \
-      "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch"\; \
+      "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch"; \
     chmod +x /usr/local/bin/gosu; \
     python -m pip install --upgrade pip; \
     python -m pip install wheel; \
