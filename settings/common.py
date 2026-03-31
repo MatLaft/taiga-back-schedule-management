@@ -340,6 +340,7 @@ INSTALLED_APPS = [
     "taiga.projects.epics",
     "taiga.projects.userstories",
     "taiga.projects.tasks",
+    "taiga.projects.schedule",
     "taiga.projects.issues",
     "taiga.projects.wiki",
     "taiga.projects.contact",
