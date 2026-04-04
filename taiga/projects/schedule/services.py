@@ -45,6 +45,7 @@ def upsert_schedule(
     entity_type,
     entity_id,
     *,
+    project_id,
     created_date=_UNSET,
     due_date=_UNSET,
     estimated_start=_UNSET,
@@ -54,11 +55,17 @@ def upsert_schedule(
 ):
     _assert_entity_type(entity_type)
     try:
-        obj, _ = Schedule.objects.get_or_create(entity_type=entity_type, entity_id=entity_id)
+        obj, _ = Schedule.objects.get_or_create(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            defaults={"project_id": project_id},
+        )
     except (ProgrammingError, OperationalError):
         return None
 
     updates = {}
+    if obj.project_id != project_id:
+        updates["project_id"] = project_id
     if created_date is not _UNSET:
         updates["created_date"] = created_date
     if due_date is not _UNSET:

@@ -24,6 +24,7 @@ class Schedule(models.Model):
         max_length=16, choices=ENTITY_TYPE_CHOICES, db_index=True
     )
     entity_id = models.BigIntegerField(db_index=True)
+    project_id = models.BigIntegerField(db_index=True)
     created_date = models.DateTimeField(
         null=True, blank=True, default=None, verbose_name=_("created date")
     )

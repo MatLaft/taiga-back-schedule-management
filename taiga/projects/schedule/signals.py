@@ -13,6 +13,7 @@ from . import services
 
 def _task_post_save(sender, instance, created, **kwargs):
     data = {
+        "project_id": instance.project_id,
         "created_date": instance.created_date,
         "due_date": instance.due_date,
     }
@@ -34,6 +35,7 @@ def _userstory_post_save(sender, instance, created, **kwargs):
     services.upsert_schedule(
         services.ENTITY_USERSTORY,
         instance.id,
+        project_id=instance.project_id,
         created_date=instance.created_date,
         due_date=instance.due_date,
     )
@@ -45,6 +47,7 @@ def _userstory_post_delete(sender, instance, **kwargs):
 
 def _epic_post_save(sender, instance, created, **kwargs):
     data = {
+        "project_id": instance.project_id,
         "created_date": instance.created_date,
     }
 
