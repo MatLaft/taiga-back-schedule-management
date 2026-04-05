@@ -31,6 +31,11 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
     project = Field(attr="project_id")
     created_date = Field()
     modified_date = Field()
+    due_date = MethodField()
+    estimated_start = MethodField()
+    actual_start = MethodField()
+    estimated_hours = MethodField()
+    actual_hours = MethodField()
     subject = Field()
     color = Field()
     epics_order = Field()
@@ -49,6 +54,21 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
     def get_user_stories_counts(self, obj):
         assert hasattr(obj, "user_stories_counts"), "instance must have a user_stories_counts attribute"
         return obj.user_stories_counts
+
+    def get_due_date(self, obj):
+        return getattr(obj, "schedule_due_date", None)
+
+    def get_estimated_start(self, obj):
+        return getattr(obj, "schedule_estimated_start", None)
+
+    def get_actual_start(self, obj):
+        return getattr(obj, "schedule_actual_start", None)
+
+    def get_estimated_hours(self, obj):
+        return getattr(obj, "schedule_estimated_hours", None)
+
+    def get_actual_hours(self, obj):
+        return getattr(obj, "schedule_actual_hours", None)
 
 
 class EpicSerializer(EpicListSerializer):

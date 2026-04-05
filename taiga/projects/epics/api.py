@@ -22,6 +22,7 @@ from taiga.projects.mixins.by_ref import ByRefMixin
 from taiga.projects.models import Project, EpicStatus
 from taiga.projects.notifications.mixins import WatchedResourceMixin, WatchersViewSetMixin
 from taiga.projects.occ import OCCResourceMixin
+from taiga.projects.schedule import services as schedule_services
 from taiga.projects.tagging.api import TaggedResourceMixin
 from taiga.projects.votes.mixins.viewsets import VotedResourceMixin, VotersViewSetMixin
 
@@ -73,6 +74,13 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
         include_attachments = "include_attachments" in self.request.QUERY_PARAMS
         qs = epics_utils.attach_extra_info(qs, user=self.request.user,
                                            include_attachments=include_attachments)
+
+        if "include_schedule" in self.request.QUERY_PARAMS:
+            qs = schedule_services.attach_schedule_fields(
+                qs,
+                schedule_services.ENTITY_EPIC,
+                ("due_date", "estimated_start", "actual_start", "estimated_hours", "actual_hours"),
+            )
 
         return qs
 

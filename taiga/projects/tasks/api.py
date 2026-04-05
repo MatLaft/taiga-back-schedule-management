@@ -24,6 +24,7 @@ from taiga.projects.notifications.mixins import AssignedToSignalMixin
 from taiga.projects.notifications.mixins import WatchedResourceMixin
 from taiga.projects.notifications.mixins import WatchersViewSetMixin
 from taiga.projects.occ import OCCResourceMixin
+from taiga.projects.schedule import services as schedule_services
 from taiga.projects.tagging.api import TaggedResourceMixin
 from taiga.projects.userstories.models import UserStory
 
@@ -92,6 +93,13 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
         include_attachments = "include_attachments" in self.request.QUERY_PARAMS
         qs = tasks_utils.attach_extra_info(qs, user=self.request.user,
                                            include_attachments=include_attachments)
+
+        if "include_schedule" in self.request.QUERY_PARAMS:
+            qs = schedule_services.attach_schedule_fields(
+                qs,
+                schedule_services.ENTITY_TASK,
+                ("estimated_start", "actual_start", "estimated_hours", "actual_hours"),
+            )
 
         return qs
 

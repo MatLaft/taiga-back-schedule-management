@@ -50,6 +50,10 @@ class UserStoryValidator(AssignedToValidator, WatchersValidator,
     tags = TagsAndTagsColorsField(default=[], required=False)
     external_reference = PgArrayField(required=False)
     points = RolePointsField(source="role_points", required=False)
+    estimated_start = serializers.DateField(required=False)
+    actual_start = serializers.DateField(required=False)
+    estimated_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
+    actual_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
 
     class Meta:
         model = models.UserStory

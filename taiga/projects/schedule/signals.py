@@ -24,6 +24,12 @@ def _task_post_save(sender, instance, created, **kwargs):
     if hasattr(instance, "actual_start"):
         data["actual_start"] = instance.actual_start
 
+    if hasattr(instance, "estimated_hours"):
+        data["estimated_hours"] = instance.estimated_hours
+
+    if hasattr(instance, "actual_hours"):
+        data["actual_hours"] = instance.actual_hours
+
     services.upsert_schedule(services.ENTITY_TASK, instance.id, **data)
 
 
@@ -32,13 +38,25 @@ def _task_post_delete(sender, instance, **kwargs):
 
 
 def _userstory_post_save(sender, instance, created, **kwargs):
-    services.upsert_schedule(
-        services.ENTITY_USERSTORY,
-        instance.id,
-        project_id=instance.project_id,
-        created_date=instance.created_date,
-        due_date=instance.due_date,
-    )
+    data = {
+        "project_id": instance.project_id,
+        "created_date": instance.created_date,
+        "due_date": instance.due_date,
+    }
+
+    if hasattr(instance, "estimated_start"):
+        data["estimated_start"] = instance.estimated_start
+
+    if hasattr(instance, "actual_start"):
+        data["actual_start"] = instance.actual_start
+
+    if hasattr(instance, "estimated_hours"):
+        data["estimated_hours"] = instance.estimated_hours
+
+    if hasattr(instance, "actual_hours"):
+        data["actual_hours"] = instance.actual_hours
+
+    services.upsert_schedule(services.ENTITY_USERSTORY, instance.id, **data)
 
 
 def _userstory_post_delete(sender, instance, **kwargs):
@@ -53,6 +71,18 @@ def _epic_post_save(sender, instance, created, **kwargs):
 
     if hasattr(instance, "due_date"):
         data["due_date"] = instance.due_date
+
+    if hasattr(instance, "estimated_start"):
+        data["estimated_start"] = instance.estimated_start
+
+    if hasattr(instance, "actual_start"):
+        data["actual_start"] = instance.actual_start
+
+    if hasattr(instance, "estimated_hours"):
+        data["estimated_hours"] = instance.estimated_hours
+
+    if hasattr(instance, "actual_hours"):
+        data["actual_hours"] = instance.actual_hours
 
     services.upsert_schedule(services.ENTITY_EPIC, instance.id, **data)
 
