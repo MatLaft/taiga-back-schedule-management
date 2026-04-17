@@ -188,8 +188,6 @@ def sync_userstory_and_tasks_schedule_color(userstory_id):
         return
 
     color = get_primary_epic_color_for_userstory(userstory_id)
-    if color is None:
-        return
 
     upsert_schedule(
         ENTITY_USERSTORY,

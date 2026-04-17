@@ -244,6 +244,27 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
                                                              milestone=milestone)
         return {}
 
+    def _persist_schedule_color_if_needed(self, obj):
+        if "include_schedule" not in self.request.QUERY_PARAMS:
+            return
+
+        inherited_color = schedule_services.get_primary_epic_color_for_userstory(obj.id)
+        has_explicit_color = "color" in self.request.DATA
+
+        if inherited_color is not None:
+            color = inherited_color
+        elif has_explicit_color:
+            color = self.request.DATA.get("color")
+        else:
+            return
+
+        schedule_services.upsert_schedule(
+            schedule_services.ENTITY_USERSTORY,
+            obj.id,
+            project_id=obj.project_id,
+            color=color,
+        )
+
     def post_save(self, obj, created=False):
         # ## start-hack-reorder ##
         # TODO: The goal should be erase this hack.
@@ -291,6 +312,8 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
 
                 role_points.save()
         # ## end-hack-rolepoints ##
+
+        self._persist_schedule_color_if_needed(obj)
 
         super().post_save(obj, created)
 

@@ -158,6 +158,30 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
                                                        milestone=milestone)
         return {}
 
+    def _persist_schedule_color_if_needed(self, obj):
+        if "include_schedule" not in self.request.QUERY_PARAMS:
+            return
+
+        inherited_color = None
+        if obj.user_story_id:
+            inherited_color = schedule_services.get_primary_epic_color_for_userstory(obj.user_story_id)
+
+        has_explicit_color = "color" in self.request.DATA
+
+        if inherited_color is not None:
+            color = inherited_color
+        elif has_explicit_color:
+            color = self.request.DATA.get("color")
+        else:
+            return
+
+        schedule_services.upsert_schedule(
+            schedule_services.ENTITY_TASK,
+            obj.id,
+            project_id=obj.project_id,
+            color=color,
+        )
+
     def post_save(self, obj, created=False):
         if not created:
             # Let's reorder the related stuff after edit the element
@@ -179,6 +203,8 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
                                               milestone=obj.milestone)
             orders_updated.update(updated)
             self.headers["Taiga-Info-Order-Updated"] = json.dumps(orders_updated)
+
+        self._persist_schedule_color_if_needed(obj)
 
         super().post_save(obj, created)
 

@@ -31,6 +31,7 @@ class TaskValidator(AssignedToValidator, WatchersValidator, EditableWatchedResou
     actual_start = serializers.DateField(required=False)
     estimated_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
     actual_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
+    color = serializers.CharField(required=False)
 
     class Meta:
         model = models.Task
