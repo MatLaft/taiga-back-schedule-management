@@ -53,6 +53,13 @@ class Schedule(models.Model):
         default=None,
         verbose_name=_("actual hours"),
     )
+    color = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        default=None,
+        verbose_name=_("color"),
+    )
     modified_date = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -59,6 +59,7 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
     actual_start = MethodField()
     estimated_hours = MethodField()
     actual_hours = MethodField()
+    color = MethodField()
     subject = Field()
     client_requirement = Field()
     team_requirement = Field()
@@ -131,6 +132,9 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
 
     def get_actual_hours(self, obj):
         return getattr(obj, "schedule_actual_hours", None)
+
+    def get_color(self, obj):
+        return getattr(obj, "schedule_color", None)
 
     def get_total_points(self, obj):
         assert hasattr(obj, "total_points_attr"), "instance must have a total_points_attr attribute"

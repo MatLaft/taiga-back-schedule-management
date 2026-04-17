@@ -30,6 +30,11 @@ def _task_post_save(sender, instance, created, **kwargs):
     if hasattr(instance, "actual_hours"):
         data["actual_hours"] = instance.actual_hours
 
+    if getattr(instance, "user_story_id", None):
+        inherited_color = services.get_primary_epic_color_for_userstory(instance.user_story_id)
+        if inherited_color is not None:
+            data["color"] = inherited_color
+
     services.upsert_schedule(services.ENTITY_TASK, instance.id, **data)
 
 
@@ -56,6 +61,10 @@ def _userstory_post_save(sender, instance, created, **kwargs):
     if hasattr(instance, "actual_hours"):
         data["actual_hours"] = instance.actual_hours
 
+    inherited_color = services.get_primary_epic_color_for_userstory(instance.id)
+    if inherited_color is not None:
+        data["color"] = inherited_color
+
     services.upsert_schedule(services.ENTITY_USERSTORY, instance.id, **data)
 
 
@@ -67,6 +76,7 @@ def _epic_post_save(sender, instance, created, **kwargs):
     data = {
         "project_id": instance.project_id,
         "created_date": instance.created_date,
+        "color": getattr(instance, "color", None),
     }
 
     if hasattr(instance, "due_date"):
@@ -85,16 +95,26 @@ def _epic_post_save(sender, instance, created, **kwargs):
         data["actual_hours"] = instance.actual_hours
 
     services.upsert_schedule(services.ENTITY_EPIC, instance.id, **data)
+    services.sync_epic_related_schedule_colors(instance.id)
 
 
 def _epic_post_delete(sender, instance, **kwargs):
     services.delete_schedule(services.ENTITY_EPIC, instance.id)
 
 
+def _related_userstory_post_save(sender, instance, created, **kwargs):
+    services.sync_userstory_and_tasks_schedule_color(instance.user_story_id)
+
+
+def _related_userstory_post_delete(sender, instance, **kwargs):
+    services.sync_userstory_and_tasks_schedule_color(instance.user_story_id)
+
+
 def connect_schedule_signals():
     task_model = apps.get_model("tasks", "Task")
     userstory_model = apps.get_model("userstories", "UserStory")
     epic_model = apps.get_model("epics", "Epic")
+    related_userstory_model = apps.get_model("epics", "RelatedUserStory")
 
     signals.post_save.connect(
         _task_post_save,
@@ -127,4 +147,15 @@ def connect_schedule_signals():
         _epic_post_delete,
         sender=epic_model,
         dispatch_uid="schedule_epic_post_delete",
+    )
+
+    signals.post_save.connect(
+        _related_userstory_post_save,
+        sender=related_userstory_model,
+        dispatch_uid="schedule_related_userstory_post_save",
+    )
+    signals.post_delete.connect(
+        _related_userstory_post_delete,
+        sender=related_userstory_model,
+        dispatch_uid="schedule_related_userstory_post_delete",
     )

@@ -155,6 +155,14 @@ def update_epic_related_userstories_order_in_bulk(bulk_data: list, epic: object)
 
         db.update_attr_in_bulk_for_ids(rus_orders, "order", models.RelatedUserStory)
 
+        from taiga.projects.schedule import services as schedule_services
+
+        affected_userstory_ids = {
+            item["us_id"] for item in bulk_data if item["us_id"] in rus_conversion
+        }
+        for userstory_id in affected_userstory_ids:
+            schedule_services.sync_userstory_and_tasks_schedule_color(userstory_id)
+
     return rus_orders
 
 

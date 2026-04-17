@@ -143,7 +143,7 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
             qs = schedule_services.attach_schedule_fields(
                 qs,
                 schedule_services.ENTITY_USERSTORY,
-                ("estimated_start", "actual_start", "estimated_hours", "actual_hours"),
+                ("estimated_start", "actual_start", "estimated_hours", "actual_hours", "color"),
             )
         return qs
 

@@ -51,7 +51,8 @@ def upsert_schedule(
     estimated_start=_UNSET,
     actual_start=_UNSET,
     estimated_hours=_UNSET,
-    actual_hours=_UNSET
+    actual_hours=_UNSET,
+    color=_UNSET,
 ):
     _assert_entity_type(entity_type)
     try:
@@ -78,6 +79,8 @@ def upsert_schedule(
         updates["estimated_hours"] = estimated_hours
     if actual_hours is not _UNSET:
         updates["actual_hours"] = actual_hours
+    if color is not _UNSET:
+        updates["color"] = color
 
     if updates:
         try:
@@ -146,3 +149,83 @@ def get_due_date(entity_type, entity_id):
 
     model = apps.get_model("tasks", "Task")
     return model.objects.filter(id=entity_id).values_list("due_date", flat=True).first()
+
+
+def get_primary_epic_color_for_userstory(userstory_id):
+    if not userstory_id:
+        return None
+
+    try:
+        related_model = apps.get_model("epics", "RelatedUserStory")
+        relation = (
+            related_model.objects
+            .filter(user_story_id=userstory_id)
+            .select_related("epic")
+            .order_by("order", "id")
+            .first()
+        )
+    except (ProgrammingError, OperationalError):
+        return None
+
+    if relation is None or relation.epic is None:
+        return None
+
+    return relation.epic.color
+
+
+def sync_userstory_and_tasks_schedule_color(userstory_id):
+    if not userstory_id:
+        return
+
+    try:
+        userstory_model = apps.get_model("userstories", "UserStory")
+        task_model = apps.get_model("tasks", "Task")
+        userstory = userstory_model.objects.filter(id=userstory_id).first()
+    except (ProgrammingError, OperationalError):
+        return
+
+    if userstory is None:
+        return
+
+    color = get_primary_epic_color_for_userstory(userstory_id)
+    if color is None:
+        return
+
+    upsert_schedule(
+        ENTITY_USERSTORY,
+        userstory.id,
+        project_id=userstory.project_id,
+        color=color,
+    )
+
+    try:
+        tasks = task_model.objects.filter(user_story_id=userstory.id).only("id", "project_id")
+    except (ProgrammingError, OperationalError):
+        return
+
+    for task in tasks:
+        upsert_schedule(
+            ENTITY_TASK,
+            task.id,
+            project_id=task.project_id,
+            color=color,
+        )
+
+
+def sync_epic_related_schedule_colors(epic_id):
+    if not epic_id:
+        return
+
+    try:
+        related_model = apps.get_model("epics", "RelatedUserStory")
+        userstory_ids = (
+            related_model.objects
+            .filter(epic_id=epic_id)
+            .values_list("user_story_id", flat=True)
+            .distinct()
+        )
+    except (ProgrammingError, OperationalError):
+        return
+
+    for userstory_id in userstory_ids:
+        sync_userstory_and_tasks_schedule_color(userstory_id)
