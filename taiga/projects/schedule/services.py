@@ -312,7 +312,7 @@ def get_userstory_bounds_violation_error(userstory):
 
     if parent_due is not None and max_child_due is not None and max_child_due > parent_due:
         return _(
-            "Cannot set user story due date earlier than one of its task due dates."
+            "It is not possible to set a date earlier than an internal item date."
         )
 
     if parent_start is not None and min_child_start is not None and min_child_start < parent_start:
@@ -332,7 +332,7 @@ def get_epic_bounds_violation_error(epic):
 
     if parent_due is not None and max_child_due is not None and max_child_due > parent_due:
         return _(
-            "Cannot set epic due date earlier than one of its user story due dates."
+            "It is not possible to set a date earlier than an internal item date."
         )
 
     if parent_start is not None and min_child_start is not None and min_child_start < parent_start:
