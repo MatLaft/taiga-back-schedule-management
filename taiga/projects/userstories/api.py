@@ -206,6 +206,10 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
             raise exc.PermissionDenied(_("You don't have permissions to set this swimlane "
                                          "to this user story."))
 
+        bounds_error = schedule_services.get_userstory_bounds_violation_error(obj)
+        if bounds_error:
+            raise exc.WrongArguments(bounds_error)
+
     def pre_save(self, obj):
         # ## start-hack-reorder ##
         if obj.id:

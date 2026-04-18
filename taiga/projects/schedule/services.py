@@ -8,6 +8,7 @@
 from django.apps import apps
 from django.db import OperationalError
 from django.db import ProgrammingError
+from django.utils.translation import gettext as _
 
 from .models import Schedule
 
@@ -151,13 +152,13 @@ def get_due_date(entity_type, entity_id):
     return model.objects.filter(id=entity_id).values_list("due_date", flat=True).first()
 
 
-def get_primary_epic_color_for_userstory(userstory_id):
+def _get_primary_epic_relation(userstory_id):
     if not userstory_id:
         return None
 
     try:
         related_model = apps.get_model("epics", "RelatedUserStory")
-        relation = (
+        return (
             related_model.objects
             .filter(user_story_id=userstory_id)
             .select_related("epic")
@@ -167,6 +168,331 @@ def get_primary_epic_color_for_userstory(userstory_id):
     except (ProgrammingError, OperationalError):
         return None
 
+
+def _get_effective_start(schedule):
+    if schedule is None:
+        return None
+
+    if schedule.actual_start is not None:
+        return schedule.actual_start
+
+    return schedule.estimated_start
+
+
+def _get_due_from_schedule_or_fallback(schedule, fallback_due):
+    if schedule is not None and schedule.due_date is not None:
+        return schedule.due_date
+
+    return fallback_due
+
+
+def _get_schedule_map(entity_type, entity_ids):
+    if not entity_ids:
+        return {}
+
+    try:
+        schedules = Schedule.objects.filter(entity_type=entity_type, entity_id__in=entity_ids)
+    except (ProgrammingError, OperationalError):
+        return {}
+
+    return {schedule.entity_id: schedule for schedule in schedules}
+
+
+def _resolve_effective_start(actual_start, estimated_start):
+    if actual_start is not None:
+        return actual_start
+
+    return estimated_start
+
+
+def _get_proposed_bounds_for_entity(obj, entity_type):
+    entity_id = getattr(obj, "id", None)
+    schedule = get_schedule(entity_type, entity_id) if entity_id else None
+
+    if hasattr(obj, "actual_start"):
+        actual_start = getattr(obj, "actual_start")
+    else:
+        actual_start = schedule.actual_start if schedule is not None else None
+
+    if hasattr(obj, "estimated_start"):
+        estimated_start = getattr(obj, "estimated_start")
+    else:
+        estimated_start = schedule.estimated_start if schedule is not None else None
+
+    if entity_type == ENTITY_EPIC:
+        if hasattr(obj, "due_date"):
+            due_date = getattr(obj, "due_date")
+        else:
+            due_date = schedule.due_date if schedule is not None else None
+    else:
+        due_date = getattr(obj, "due_date", None)
+
+    return _resolve_effective_start(actual_start, estimated_start), due_date
+
+
+def _get_task_children_bounds(userstory_id):
+    if not userstory_id:
+        return None, None
+
+    try:
+        task_model = apps.get_model("tasks", "Task")
+        tasks = list(task_model.objects.filter(user_story_id=userstory_id).only("id", "due_date"))
+    except (ProgrammingError, OperationalError):
+        return None, None
+
+    if not tasks:
+        return None, None
+
+    schedule_map = _get_schedule_map(ENTITY_TASK, [task.id for task in tasks])
+
+    min_start = None
+    max_due = None
+    for task in tasks:
+        schedule = schedule_map.get(task.id)
+        start = _get_effective_start(schedule)
+        due = _get_due_from_schedule_or_fallback(schedule, task.due_date)
+
+        if start is not None and (min_start is None or start < min_start):
+            min_start = start
+
+        if due is not None and (max_due is None or due > max_due):
+            max_due = due
+
+    return min_start, max_due
+
+
+def _get_userstory_children_bounds(epic_id):
+    if not epic_id:
+        return None, None
+
+    try:
+        related_model = apps.get_model("epics", "RelatedUserStory")
+        userstory_ids = list(
+            related_model.objects
+            .filter(epic_id=epic_id)
+            .values_list("user_story_id", flat=True)
+            .distinct()
+        )
+    except (ProgrammingError, OperationalError):
+        return None, None
+
+    if not userstory_ids:
+        return None, None
+
+    try:
+        userstory_model = apps.get_model("userstories", "UserStory")
+        userstories = list(userstory_model.objects.filter(id__in=userstory_ids).only("id", "due_date"))
+    except (ProgrammingError, OperationalError):
+        return None, None
+
+    schedule_map = _get_schedule_map(ENTITY_USERSTORY, userstory_ids)
+
+    min_start = None
+    max_due = None
+    for userstory in userstories:
+        schedule = schedule_map.get(userstory.id)
+        start = _get_effective_start(schedule)
+        due = _get_due_from_schedule_or_fallback(schedule, userstory.due_date)
+
+        if start is not None and (min_start is None or start < min_start):
+            min_start = start
+
+        if due is not None and (max_due is None or due > max_due):
+            max_due = due
+
+    return min_start, max_due
+
+
+def get_userstory_bounds_violation_error(userstory):
+    if userstory is None or not getattr(userstory, "id", None):
+        return None
+
+    parent_start, parent_due = _get_proposed_bounds_for_entity(userstory, ENTITY_USERSTORY)
+    min_child_start, max_child_due = _get_task_children_bounds(userstory.id)
+
+    if parent_due is not None and max_child_due is not None and max_child_due > parent_due:
+        return _(
+            "Cannot set user story due date earlier than one of its task due dates."
+        )
+
+    if parent_start is not None and min_child_start is not None and min_child_start < parent_start:
+        return _(
+            "Cannot set user story start date later than one of its task start dates."
+        )
+
+    return None
+
+
+def get_epic_bounds_violation_error(epic):
+    if epic is None or not getattr(epic, "id", None):
+        return None
+
+    parent_start, parent_due = _get_proposed_bounds_for_entity(epic, ENTITY_EPIC)
+    min_child_start, max_child_due = _get_userstory_children_bounds(epic.id)
+
+    if parent_due is not None and max_child_due is not None and max_child_due > parent_due:
+        return _(
+            "Cannot set epic due date earlier than one of its user story due dates."
+        )
+
+    if parent_start is not None and min_child_start is not None and min_child_start < parent_start:
+        return _(
+            "Cannot set epic start date later than one of its user story start dates."
+        )
+
+    return None
+
+
+def _build_expand_bounds_updates(schedule, fallback_due, candidate_start, candidate_due):
+    updates = {}
+
+    if candidate_start is not None:
+        if schedule is not None and schedule.actual_start is not None:
+            if candidate_start < schedule.actual_start:
+                updates["actual_start"] = candidate_start
+        elif schedule is not None and schedule.estimated_start is not None:
+            if candidate_start < schedule.estimated_start:
+                updates["estimated_start"] = candidate_start
+        else:
+            updates["estimated_start"] = candidate_start
+
+    current_due = _get_due_from_schedule_or_fallback(schedule, fallback_due)
+    if candidate_due is not None and (current_due is None or candidate_due > current_due):
+        updates["due_date"] = candidate_due
+
+    return updates
+
+
+def _expand_userstory_bounds(userstory, candidate_start, candidate_due):
+    schedule = get_schedule(ENTITY_USERSTORY, userstory.id)
+    updates = _build_expand_bounds_updates(
+        schedule,
+        userstory.due_date,
+        candidate_start,
+        candidate_due,
+    )
+    if not updates:
+        return updates
+
+    upsert_schedule(
+        ENTITY_USERSTORY,
+        userstory.id,
+        project_id=userstory.project_id,
+        **updates
+    )
+
+    if "due_date" in updates:
+        try:
+            userstory_model = apps.get_model("userstories", "UserStory")
+            userstory_model.objects.filter(id=userstory.id).update(due_date=updates["due_date"])
+        except (ProgrammingError, OperationalError):
+            return updates
+        userstory.due_date = updates["due_date"]
+
+    return updates
+
+
+def ensure_userstory_and_epic_bounds_from_task(task_id, userstory_id=None):
+    if not task_id:
+        return
+
+    try:
+        task_model = apps.get_model("tasks", "Task")
+        filters = {"id": task_id}
+        if userstory_id is not None:
+            filters["user_story_id"] = userstory_id
+        task = (
+            task_model.objects
+            .filter(**filters)
+            .only("id", "project_id", "user_story_id", "due_date")
+            .first()
+        )
+    except (ProgrammingError, OperationalError):
+        return
+
+    if task is None or not task.user_story_id:
+        return
+
+    task_schedule = get_schedule(ENTITY_TASK, task.id)
+    task_start = _get_effective_start(task_schedule)
+    task_due = _get_due_from_schedule_or_fallback(task_schedule, task.due_date)
+
+    try:
+        userstory_model = apps.get_model("userstories", "UserStory")
+        userstory = (
+            userstory_model.objects
+            .filter(id=task.user_story_id)
+            .only("id", "project_id", "due_date")
+            .first()
+        )
+    except (ProgrammingError, OperationalError):
+        return
+
+    if userstory is None:
+        return
+
+    _expand_userstory_bounds(userstory, task_start, task_due)
+    ensure_epic_bounds_for_userstory(userstory.id)
+
+
+def ensure_epic_bounds_for_userstory(userstory_id):
+    if not userstory_id:
+        return
+
+    try:
+        userstory_model = apps.get_model("userstories", "UserStory")
+        userstory = (
+            userstory_model.objects
+            .filter(id=userstory_id)
+            .only("id", "project_id", "due_date")
+            .first()
+        )
+    except (ProgrammingError, OperationalError):
+        return
+
+    if userstory is None:
+        return
+
+    relation = _get_primary_epic_relation(userstory.id)
+    if relation is None or relation.epic_id is None:
+        return
+
+    epic = relation.epic
+    if epic is None:
+        try:
+            epic_model = apps.get_model("epics", "Epic")
+            epic = epic_model.objects.filter(id=relation.epic_id).only("id", "project_id").first()
+        except (ProgrammingError, OperationalError):
+            return
+
+    if epic is None:
+        return
+
+    userstory_schedule = get_schedule(ENTITY_USERSTORY, userstory.id)
+    userstory_start = _get_effective_start(userstory_schedule)
+    userstory_due = _get_due_from_schedule_or_fallback(userstory_schedule, userstory.due_date)
+
+    epic_schedule = get_schedule(ENTITY_EPIC, epic.id)
+    updates = _build_expand_bounds_updates(
+        epic_schedule,
+        getattr(epic, "due_date", None),
+        userstory_start,
+        userstory_due,
+    )
+
+    if not updates:
+        return
+
+    upsert_schedule(
+        ENTITY_EPIC,
+        epic.id,
+        project_id=epic.project_id,
+        **updates
+    )
+
+
+def get_primary_epic_color_for_userstory(userstory_id):
+    relation = _get_primary_epic_relation(userstory_id)
     if relation is None or relation.epic is None:
         return None
 

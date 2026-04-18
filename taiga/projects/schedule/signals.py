@@ -40,6 +40,10 @@ def _task_post_save(sender, instance, created, **kwargs):
         data["color"] = instance.color
 
     services.upsert_schedule(services.ENTITY_TASK, instance.id, **data)
+    services.ensure_userstory_and_epic_bounds_from_task(
+        instance.id,
+        getattr(instance, "user_story_id", None),
+    )
 
 
 def _task_post_delete(sender, instance, **kwargs):
@@ -72,6 +76,7 @@ def _userstory_post_save(sender, instance, created, **kwargs):
         data["color"] = instance.color
 
     services.upsert_schedule(services.ENTITY_USERSTORY, instance.id, **data)
+    services.ensure_epic_bounds_for_userstory(instance.id)
 
 
 def _userstory_post_delete(sender, instance, **kwargs):
@@ -110,10 +115,12 @@ def _epic_post_delete(sender, instance, **kwargs):
 
 def _related_userstory_post_save(sender, instance, created, **kwargs):
     services.sync_userstory_and_tasks_schedule_color(instance.user_story_id)
+    services.ensure_epic_bounds_for_userstory(instance.user_story_id)
 
 
 def _related_userstory_post_delete(sender, instance, **kwargs):
     services.sync_userstory_and_tasks_schedule_color(instance.user_story_id)
+    services.ensure_epic_bounds_for_userstory(instance.user_story_id)
 
 
 def connect_schedule_signals():

@@ -90,6 +90,10 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
         if obj.status and obj.status.project != obj.project:
             raise exc.WrongArguments(_("You don't have permissions to set this status to this epic."))
 
+        bounds_error = schedule_services.get_epic_bounds_violation_error(obj)
+        if bounds_error:
+            raise exc.WrongArguments(bounds_error)
+
     """
     Updating the epic order attribute can affect the ordering of another epics
     This method generate a key for the epic and can be used to be compared before and after
