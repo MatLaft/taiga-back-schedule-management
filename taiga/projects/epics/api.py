@@ -79,7 +79,14 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
             qs = schedule_services.attach_schedule_fields(
                 qs,
                 schedule_services.ENTITY_EPIC,
-                ("due_date", "estimated_start", "actual_start", "estimated_hours", "actual_hours"),
+                (
+                    "id",
+                    "due_date",
+                    "estimated_start",
+                    "actual_start",
+                    "estimated_hours",
+                    "actual_hours",
+                ),
             )
 
         return qs
@@ -93,6 +100,13 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
         bounds_error = schedule_services.get_epic_bounds_violation_error(obj)
         if bounds_error:
             raise exc.WrongArguments(bounds_error)
+
+        dependency_error = schedule_services.get_dependency_start_violation_error(
+            obj,
+            schedule_services.ENTITY_EPIC,
+        )
+        if dependency_error:
+            raise exc.WrongArguments(dependency_error)
 
     """
     Updating the epic order attribute can affect the ordering of another epics

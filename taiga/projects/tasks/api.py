@@ -98,7 +98,14 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
             qs = schedule_services.attach_schedule_fields(
                 qs,
                 schedule_services.ENTITY_TASK,
-                ("estimated_start", "actual_start", "estimated_hours", "actual_hours", "color"),
+                (
+                    "id",
+                    "estimated_start",
+                    "actual_start",
+                    "estimated_hours",
+                    "actual_hours",
+                    "color",
+                ),
             )
 
         return qs
@@ -117,6 +124,13 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
 
         if obj.milestone and obj.user_story and obj.milestone != obj.user_story.milestone:
             raise exc.WrongArguments(_("You don't have permissions to set this sprint to this task."))
+
+        dependency_error = schedule_services.get_dependency_start_violation_error(
+            obj,
+            schedule_services.ENTITY_TASK,
+        )
+        if dependency_error:
+            raise exc.WrongArguments(dependency_error)
 
     """
     Updating some attributes of the userstory can affect the ordering in the backlog, kanban or taskboard

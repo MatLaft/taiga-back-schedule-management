@@ -343,6 +343,45 @@ def get_epic_bounds_violation_error(epic):
     return None
 
 
+def get_dependency_start_violation_error(obj, entity_type):
+    if obj is None or not getattr(obj, "id", None):
+        return None
+
+    schedule = get_schedule(entity_type, obj.id)
+    if schedule is None:
+        return None
+
+    proposed_start, _ = _get_proposed_bounds_for_entity(obj, entity_type)
+
+    try:
+        dependency_model = apps.get_model("schedule", "ScheduleDependency")
+        incoming_dependencies = (
+            dependency_model.objects
+            .filter(to_schedule_id=schedule.id)
+            .select_related("from_schedule")
+        )
+    except (ProgrammingError, OperationalError):
+        return None
+
+    if not incoming_dependencies.exists():
+        return None
+
+    if proposed_start is None:
+        return _("The target schedule must have a start date.")
+
+    for dependency in incoming_dependencies:
+        source_due_date = dependency.from_schedule.due_date if dependency.from_schedule_id else None
+        if source_due_date is None:
+            continue
+
+        if proposed_start <= source_due_date:
+            return _(
+                "The target schedule must start after the source schedule due date."
+            )
+
+    return None
+
+
 def _build_expand_bounds_updates(schedule, fallback_due, candidate_start, candidate_due):
     updates = {}
 

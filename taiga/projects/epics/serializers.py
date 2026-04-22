@@ -27,6 +27,7 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
                          TaggedInProjectResourceSerializer, serializers.LightSerializer):
 
     id = Field()
+    schedule_id = MethodField()
     ref = Field()
     project = Field(attr="project_id")
     created_date = Field()
@@ -54,6 +55,9 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
     def get_user_stories_counts(self, obj):
         assert hasattr(obj, "user_stories_counts"), "instance must have a user_stories_counts attribute"
         return obj.user_stories_counts
+
+    def get_schedule_id(self, obj):
+        return getattr(obj, "schedule_id", None)
 
     def get_due_date(self, obj):
         return getattr(obj, "schedule_due_date", None)

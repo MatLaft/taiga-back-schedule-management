@@ -175,6 +175,7 @@ from taiga.projects.issues.api import IssueWatchersViewSet
 from taiga.projects.wiki.api import WikiViewSet
 from taiga.projects.wiki.api import WikiLinkViewSet
 from taiga.projects.wiki.api import WikiWatchersViewSet
+from taiga.projects.schedule.api import ScheduleDependencyViewSet
 
 router.register(r"milestones", MilestoneViewSet,
                 base_name="milestones")
@@ -218,6 +219,8 @@ router.register(r"wiki/(?P<resource_id>\d+)/watchers", WikiWatchersViewSet,
                 base_name="wiki-watchers")
 router.register(r"wiki-links", WikiLinkViewSet,
                 base_name="wiki-links")
+router.register(r"schedule-dependencies", ScheduleDependencyViewSet,
+                base_name="schedule-dependencies")
 
 
 # Delete owned projects

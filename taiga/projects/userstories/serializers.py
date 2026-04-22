@@ -42,6 +42,7 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
         DueDateSerializerMixin, serializers.LightSerializer):
 
     id = Field()
+    schedule_id = MethodField()
     ref = Field()
     milestone = Field(attr="milestone_id")
     milestone_slug = MethodField()
@@ -120,6 +121,9 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
 
     def get_milestone_name(self, obj):
         return obj.milestone.name if obj.milestone else None
+
+    def get_schedule_id(self, obj):
+        return getattr(obj, "schedule_id", None)
 
     def get_estimated_start(self, obj):
         return getattr(obj, "schedule_estimated_start", None)

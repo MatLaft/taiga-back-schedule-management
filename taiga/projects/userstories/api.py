@@ -143,7 +143,14 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
             qs = schedule_services.attach_schedule_fields(
                 qs,
                 schedule_services.ENTITY_USERSTORY,
-                ("estimated_start", "actual_start", "estimated_hours", "actual_hours", "color"),
+                (
+                    "id",
+                    "estimated_start",
+                    "actual_start",
+                    "estimated_hours",
+                    "actual_hours",
+                    "color",
+                ),
             )
         return qs
 
@@ -209,6 +216,13 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
         bounds_error = schedule_services.get_userstory_bounds_violation_error(obj)
         if bounds_error:
             raise exc.WrongArguments(bounds_error)
+
+        dependency_error = schedule_services.get_dependency_start_violation_error(
+            obj,
+            schedule_services.ENTITY_USERSTORY,
+        )
+        if dependency_error:
+            raise exc.WrongArguments(dependency_error)
 
     def pre_save(self, obj):
         # ## start-hack-reorder ##
