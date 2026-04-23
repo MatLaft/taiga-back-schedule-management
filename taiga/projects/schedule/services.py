@@ -5,6 +5,9 @@
 #
 # Copyright (c) 2021-present Kaleidos INC
 
+from collections import deque
+from datetime import timedelta
+
 from django.apps import apps
 from django.db import OperationalError
 from django.db import ProgrammingError
@@ -382,6 +385,171 @@ def get_dependency_start_violation_error(obj, entity_type):
     return None
 
 
+def _get_model_for_entity_type(entity_type):
+    if entity_type == ENTITY_EPIC:
+        return apps.get_model("epics", "Epic")
+    if entity_type == ENTITY_USERSTORY:
+        return apps.get_model("userstories", "UserStory")
+    if entity_type == ENTITY_TASK:
+        return apps.get_model("tasks", "Task")
+    return None
+
+
+def _update_entity_due_date_for_schedule(schedule, due_date):
+    if schedule is None or not schedule.entity_id:
+        return
+
+    try:
+        model = _get_model_for_entity_type(schedule.entity_type)
+    except (ProgrammingError, OperationalError):
+        return
+
+    if model is None:
+        return
+
+    try:
+        model.objects.filter(id=schedule.entity_id).update(due_date=due_date)
+    except (ProgrammingError, OperationalError):
+        return
+
+
+def _get_required_start_from_incoming_dependencies(schedule_id):
+    if not schedule_id:
+        return None
+
+    try:
+        dependency_model = apps.get_model("schedule", "ScheduleDependency")
+        incoming_dependencies = (
+            dependency_model.objects
+            .filter(to_schedule_id=schedule_id)
+            .select_related("from_schedule")
+        )
+    except (ProgrammingError, OperationalError):
+        return None
+
+    required_start = None
+    for dependency in incoming_dependencies:
+        source_due_date = dependency.from_schedule.due_date if dependency.from_schedule_id else None
+        if source_due_date is None:
+            continue
+
+        candidate = source_due_date + timedelta(days=1)
+        if required_start is None or candidate > required_start:
+            required_start = candidate
+
+    return required_start
+
+
+def _shift_schedule_forward_to_start(schedule, required_start):
+    if schedule is None or required_start is None:
+        return False, False
+
+    current_start = _get_effective_start(schedule)
+    if current_start is not None and current_start >= required_start:
+        return False, False
+
+    updates = {}
+    if schedule.actual_start is not None:
+        updates["actual_start"] = required_start
+    else:
+        updates["estimated_start"] = required_start
+
+    current_due = schedule.due_date
+    if current_due is not None:
+        if current_start is not None:
+            duration_days = (current_due - current_start).days
+            duration_days = max(duration_days, 0)
+            next_due = required_start + timedelta(days=duration_days)
+        else:
+            next_due = max(current_due, required_start)
+
+        if next_due != current_due:
+            updates["due_date"] = next_due
+
+    if not updates:
+        return False, False
+
+    try:
+        Schedule.objects.filter(id=schedule.id).update(**updates)
+    except (ProgrammingError, OperationalError):
+        return False, False
+
+    for key, value in updates.items():
+        setattr(schedule, key, value)
+
+    if "due_date" in updates:
+        _update_entity_due_date_for_schedule(schedule, updates["due_date"])
+
+    return True, "due_date" in updates
+
+
+def propagate_dependency_chain_forward_from_schedule(schedule_id):
+    if not schedule_id:
+        return
+
+    try:
+        dependency_model = apps.get_model("schedule", "ScheduleDependency")
+    except (ProgrammingError, OperationalError):
+        return
+
+    queue = deque([schedule_id])
+    queued = {schedule_id}
+    max_iterations = 10000
+    iterations = 0
+
+    while queue and iterations < max_iterations:
+        iterations += 1
+        current_schedule_id = queue.popleft()
+        queued.discard(current_schedule_id)
+
+        try:
+            outgoing_target_ids = list(
+                dependency_model.objects
+                .filter(from_schedule_id=current_schedule_id)
+                .values_list("to_schedule_id", flat=True)
+            )
+        except (ProgrammingError, OperationalError):
+            return
+
+        for target_schedule_id in outgoing_target_ids:
+            try:
+                target_schedule = (
+                    Schedule.objects
+                    .filter(id=target_schedule_id)
+                    .only(
+                        "id",
+                        "entity_type",
+                        "entity_id",
+                        "estimated_start",
+                        "actual_start",
+                        "due_date",
+                    )
+                    .first()
+                )
+            except (ProgrammingError, OperationalError):
+                return
+
+            if target_schedule is None:
+                continue
+
+            required_start = _get_required_start_from_incoming_dependencies(target_schedule.id)
+            if required_start is None:
+                continue
+
+            shifted, due_changed = _shift_schedule_forward_to_start(target_schedule, required_start)
+            if shifted and due_changed and target_schedule.id not in queued:
+                queue.append(target_schedule.id)
+                queued.add(target_schedule.id)
+
+
+def propagate_dependency_chain_forward(entity_type, entity_id):
+    schedule = get_schedule(entity_type, entity_id)
+    if schedule is None:
+        return
+
+    propagate_dependency_chain_forward_from_schedule(schedule.id)
+
+
 def _build_expand_bounds_updates(schedule, fallback_due, candidate_start, candidate_due):
     updates = {}
 
@@ -427,6 +595,8 @@ def _expand_userstory_bounds(userstory, candidate_start, candidate_due):
         except (ProgrammingError, OperationalError):
             return updates
         userstory.due_date = updates["due_date"]
+
+    propagate_dependency_chain_forward(ENTITY_USERSTORY, userstory.id)
 
     return updates
 
@@ -528,6 +698,8 @@ def ensure_epic_bounds_for_userstory(userstory_id):
         project_id=epic.project_id,
         **updates
     )
+
+    propagate_dependency_chain_forward(ENTITY_EPIC, epic.id)
 
 
 def get_primary_epic_color_for_userstory(userstory_id):

@@ -151,3 +151,86 @@ def test_dependency_start_violation_allows_when_target_starts_after_source_due()
     )
 
     assert error is None
+
+
+def test_propagates_forward_dependency_chain_preserving_duration():
+    schedule_a = _create_schedule(
+        1,
+        estimated_start=date(2026, 1, 1),
+        due_date=date(2026, 1, 10),
+    )
+    schedule_b = _create_schedule(
+        2,
+        estimated_start=date(2026, 1, 13),
+        due_date=date(2026, 1, 16),
+    )
+    schedule_c = _create_schedule(
+        3,
+        estimated_start=date(2026, 1, 17),
+        due_date=date(2026, 1, 20),
+    )
+
+    ScheduleDependency.objects.create(from_schedule=schedule_a, to_schedule=schedule_b)
+    ScheduleDependency.objects.create(from_schedule=schedule_b, to_schedule=schedule_c)
+
+    Schedule.objects.filter(id=schedule_a.id).update(due_date=date(2026, 1, 14))
+    schedule_services.propagate_dependency_chain_forward_from_schedule(schedule_a.id)
+
+    schedule_b.refresh_from_db()
+    schedule_c.refresh_from_db()
+
+    assert schedule_b.estimated_start == date(2026, 1, 15)
+    assert schedule_b.due_date == date(2026, 1, 18)
+    assert schedule_c.estimated_start == date(2026, 1, 19)
+    assert schedule_c.due_date == date(2026, 1, 22)
+
+
+def test_propagation_uses_most_restrictive_incoming_dependency():
+    schedule_a = _create_schedule(
+        1,
+        estimated_start=date(2026, 1, 1),
+        due_date=date(2026, 1, 10),
+    )
+    schedule_b = _create_schedule(
+        2,
+        estimated_start=date(2026, 1, 1),
+        due_date=date(2026, 1, 12),
+    )
+    target = _create_schedule(
+        3,
+        estimated_start=date(2026, 1, 13),
+        due_date=date(2026, 1, 16),
+    )
+
+    ScheduleDependency.objects.create(from_schedule=schedule_a, to_schedule=target)
+    ScheduleDependency.objects.create(from_schedule=schedule_b, to_schedule=target)
+
+    Schedule.objects.filter(id=schedule_a.id).update(due_date=date(2026, 1, 14))
+    schedule_services.propagate_dependency_chain_forward_from_schedule(schedule_a.id)
+
+    target.refresh_from_db()
+
+    assert target.estimated_start == date(2026, 1, 15)
+    assert target.due_date == date(2026, 1, 18)
+
+
+def test_propagation_does_not_pull_targets_backwards():
+    source = _create_schedule(
+        1,
+        estimated_start=date(2026, 1, 1),
+        due_date=date(2026, 1, 10),
+    )
+    target = _create_schedule(
+        2,
+        estimated_start=date(2026, 1, 13),
+        due_date=date(2026, 1, 16),
+    )
+
+    ScheduleDependency.objects.create(from_schedule=source, to_schedule=target)
+
+    Schedule.objects.filter(id=source.id).update(due_date=date(2026, 1, 7))
+    schedule_services.propagate_dependency_chain_forward_from_schedule(source.id)
+
+    target.refresh_from_db()
+    assert target.estimated_start == date(2026, 1, 13)
+    assert target.due_date == date(2026, 1, 16)

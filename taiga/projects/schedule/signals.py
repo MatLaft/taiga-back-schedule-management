@@ -44,6 +44,7 @@ def _task_post_save(sender, instance, created, **kwargs):
         instance.id,
         getattr(instance, "user_story_id", None),
     )
+    services.propagate_dependency_chain_forward(services.ENTITY_TASK, instance.id)
 
 
 def _task_post_delete(sender, instance, **kwargs):
@@ -77,6 +78,7 @@ def _userstory_post_save(sender, instance, created, **kwargs):
 
     services.upsert_schedule(services.ENTITY_USERSTORY, instance.id, **data)
     services.ensure_epic_bounds_for_userstory(instance.id)
+    services.propagate_dependency_chain_forward(services.ENTITY_USERSTORY, instance.id)
 
 
 def _userstory_post_delete(sender, instance, **kwargs):
@@ -107,6 +109,7 @@ def _epic_post_save(sender, instance, created, **kwargs):
 
     services.upsert_schedule(services.ENTITY_EPIC, instance.id, **data)
     services.sync_epic_related_schedule_colors(instance.id)
+    services.propagate_dependency_chain_forward(services.ENTITY_EPIC, instance.id)
 
 
 def _epic_post_delete(sender, instance, **kwargs):
