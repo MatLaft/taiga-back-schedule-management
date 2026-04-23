@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError
 from taiga.projects.schedule import services as schedule_services
 from taiga.projects.schedule.models import Schedule
 from taiga.projects.schedule.models import ScheduleDependency
+from tests import factories
 
 
 pytestmark = pytest.mark.django_db
@@ -147,6 +148,108 @@ def test_dependency_start_violation_allows_when_target_starts_after_source_due()
 
     error = schedule_services.get_dependency_start_violation_error(
         updated_target,
+        schedule_services.ENTITY_TASK,
+    )
+
+    assert error is None
+
+
+def test_ancestor_dependency_violation_blocks_when_task_would_pull_userstory_start_too_early():
+    project = factories.create_project()
+    source = factories.create_task(project=project, due_date=date(2026, 1, 10))
+    target_userstory = factories.create_userstory(project=project, due_date=date(2026, 1, 20))
+    child_task = factories.create_task(
+        project=project,
+        user_story=target_userstory,
+        due_date=date(2026, 1, 16),
+    )
+
+    source_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        source.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 1),
+        due_date=date(2026, 1, 10),
+    )
+    target_userstory_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_USERSTORY,
+        target_userstory.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 12),
+        due_date=date(2026, 1, 20),
+    )
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        child_task.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 12),
+        due_date=date(2026, 1, 16),
+    )
+
+    ScheduleDependency.objects.create(
+        from_schedule=source_schedule,
+        to_schedule=target_userstory_schedule,
+    )
+
+    updated_task = SimpleNamespace(
+        id=child_task.id,
+        user_story_id=target_userstory.id,
+        estimated_start=date(2026, 1, 9),
+    )
+
+    error = schedule_services.get_ancestor_dependency_start_violation_error(
+        updated_task,
+        schedule_services.ENTITY_TASK,
+    )
+
+    assert error is not None
+
+
+def test_ancestor_dependency_violation_allows_when_task_keeps_userstory_start_after_dependency():
+    project = factories.create_project()
+    source = factories.create_task(project=project, due_date=date(2026, 1, 10))
+    target_userstory = factories.create_userstory(project=project, due_date=date(2026, 1, 20))
+    child_task = factories.create_task(
+        project=project,
+        user_story=target_userstory,
+        due_date=date(2026, 1, 16),
+    )
+
+    source_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        source.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 1),
+        due_date=date(2026, 1, 10),
+    )
+    target_userstory_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_USERSTORY,
+        target_userstory.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 12),
+        due_date=date(2026, 1, 20),
+    )
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        child_task.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 12),
+        due_date=date(2026, 1, 16),
+    )
+
+    ScheduleDependency.objects.create(
+        from_schedule=source_schedule,
+        to_schedule=target_userstory_schedule,
+    )
+
+    updated_task = SimpleNamespace(
+        id=child_task.id,
+        user_story_id=target_userstory.id,
+        estimated_start=date(2026, 1, 11),
+    )
+
+    error = schedule_services.get_ancestor_dependency_start_violation_error(
+        updated_task,
         schedule_services.ENTITY_TASK,
     )
 

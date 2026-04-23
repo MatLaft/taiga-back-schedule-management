@@ -132,6 +132,13 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
         if dependency_error:
             raise exc.WrongArguments(dependency_error)
 
+        ancestor_dependency_error = schedule_services.get_ancestor_dependency_start_violation_error(
+            obj,
+            schedule_services.ENTITY_TASK,
+        )
+        if ancestor_dependency_error:
+            raise exc.WrongArguments(ancestor_dependency_error)
+
     """
     Updating some attributes of the userstory can affect the ordering in the backlog, kanban or taskboard
     These two methods generate a key for the task and can be used to be compared before and after

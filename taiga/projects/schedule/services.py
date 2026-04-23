@@ -385,6 +385,97 @@ def get_dependency_start_violation_error(obj, entity_type):
     return None
 
 
+def _expand_parent_start(current_parent_start, child_start):
+    if child_start is None:
+        return current_parent_start
+
+    if current_parent_start is None or child_start < current_parent_start:
+        return child_start
+
+    return current_parent_start
+
+
+def _get_dependency_violation_for_candidate_start(schedule, candidate_start):
+    if schedule is None or candidate_start is None:
+        return None
+
+    required_start = _get_required_start_from_incoming_dependencies(schedule.id)
+    if required_start is None:
+        return None
+
+    if candidate_start < required_start:
+        return _(
+            "The target schedule must start after the source schedule due date."
+        )
+
+    return None
+
+
+def _get_task_parent_userstory_id(task_obj):
+    userstory_id = getattr(task_obj, "user_story_id", None)
+    if userstory_id:
+        return userstory_id
+
+    userstory = getattr(task_obj, "user_story", None)
+    if userstory is None:
+        return None
+
+    return getattr(userstory, "id", None)
+
+
+def _get_epic_dependency_violation_for_userstory_candidate_start(userstory_id, userstory_candidate_start):
+    if not userstory_id or userstory_candidate_start is None:
+        return None
+
+    relation = _get_primary_epic_relation(userstory_id)
+    if relation is None or relation.epic_id is None:
+        return None
+
+    epic_schedule = get_schedule(ENTITY_EPIC, relation.epic_id)
+    epic_current_start = _get_effective_start(epic_schedule)
+    epic_candidate_start = _expand_parent_start(epic_current_start, userstory_candidate_start)
+
+    return _get_dependency_violation_for_candidate_start(epic_schedule, epic_candidate_start)
+
+
+def get_ancestor_dependency_start_violation_error(obj, entity_type):
+    if obj is None or not getattr(obj, "id", None):
+        return None
+
+    proposed_start, _ = _get_proposed_bounds_for_entity(obj, entity_type)
+    if proposed_start is None:
+        return None
+
+    if entity_type == ENTITY_TASK:
+        userstory_id = _get_task_parent_userstory_id(obj)
+        if not userstory_id:
+            return None
+
+        userstory_schedule = get_schedule(ENTITY_USERSTORY, userstory_id)
+        userstory_current_start = _get_effective_start(userstory_schedule)
+        userstory_candidate_start = _expand_parent_start(userstory_current_start, proposed_start)
+
+        userstory_violation = _get_dependency_violation_for_candidate_start(
+            userstory_schedule,
+            userstory_candidate_start,
+        )
+        if userstory_violation:
+            return userstory_violation
+
+        return _get_epic_dependency_violation_for_userstory_candidate_start(
+            userstory_id,
+            userstory_candidate_start,
+        )
+
+    if entity_type == ENTITY_USERSTORY:
+        return _get_epic_dependency_violation_for_userstory_candidate_start(
+            obj.id,
+            proposed_start,
+        )
+
+    return None
+
+
 def _get_model_for_entity_type(entity_type):
     if entity_type == ENTITY_EPIC:
         return apps.get_model("epics", "Epic")

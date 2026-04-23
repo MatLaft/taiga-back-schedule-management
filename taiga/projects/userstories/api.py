@@ -224,6 +224,13 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
         if dependency_error:
             raise exc.WrongArguments(dependency_error)
 
+        ancestor_dependency_error = schedule_services.get_ancestor_dependency_start_violation_error(
+            obj,
+            schedule_services.ENTITY_USERSTORY,
+        )
+        if ancestor_dependency_error:
+            raise exc.WrongArguments(ancestor_dependency_error)
+
     def pre_save(self, obj):
         # ## start-hack-reorder ##
         if obj.id:
