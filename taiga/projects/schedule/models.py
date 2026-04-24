@@ -140,3 +140,111 @@ class ScheduleDependency(models.Model):
 
     def __str__(self):
         return "{} -> {}".format(self.from_schedule_id, self.to_schedule_id)
+
+
+class ScheduleItemOrder(models.Model):
+    ROOT_PARENT_ENTITY_TYPE = ""
+    ROOT_PARENT_ENTITY_ID = 0
+
+    schedule = models.OneToOneField(
+        Schedule,
+        related_name="item_order",
+        on_delete=models.CASCADE,
+    )
+    project_id = models.BigIntegerField(db_index=True)
+    entity_type = models.CharField(
+        max_length=16, choices=Schedule.ENTITY_TYPE_CHOICES, db_index=True
+    )
+    parent_entity_type = models.CharField(
+        max_length=16,
+        blank=True,
+        default=ROOT_PARENT_ENTITY_TYPE,
+        db_index=True,
+    )
+    parent_entity_id = models.BigIntegerField(
+        default=ROOT_PARENT_ENTITY_ID, db_index=True
+    )
+    position = models.PositiveIntegerField(default=1)
+    modified_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "schedule item order"
+        verbose_name_plural = "schedule item orders"
+        unique_together = (
+            ("project_id", "entity_type", "parent_entity_type", "parent_entity_id", "position"),
+        )
+        indexes = [
+            models.Index(
+                fields=[
+                    "project_id",
+                    "entity_type",
+                    "parent_entity_type",
+                    "parent_entity_id",
+                    "position",
+                ],
+                name="schedule_sc_project_484285_idx",
+            ),
+        ]
+        ordering = [
+            "project_id",
+            "entity_type",
+            "parent_entity_type",
+            "parent_entity_id",
+            "position",
+            "id",
+        ]
+
+    def clean(self):
+        super().clean()
+
+        if not self.schedule_id:
+            return
+
+        schedule = self.schedule
+
+        if schedule.project_id != self.project_id:
+            raise ValidationError(
+                _("The schedule order project must match the schedule project.")
+            )
+
+        if schedule.entity_type != self.entity_type:
+            raise ValidationError(
+                _("The schedule order entity type must match the schedule entity type.")
+            )
+
+        if self.position is None or self.position < 1:
+            raise ValidationError(_("The schedule order position must be greater than zero."))
+
+        is_root_parent = (
+            self.parent_entity_type == self.ROOT_PARENT_ENTITY_TYPE
+            and self.parent_entity_id == self.ROOT_PARENT_ENTITY_ID
+        )
+
+        if self.entity_type == Schedule.TYPE_EPIC:
+            if not is_root_parent:
+                raise ValidationError(_("Epic schedule order items must have a root parent."))
+            return
+
+        if self.entity_type == Schedule.TYPE_USERSTORY:
+            if is_root_parent:
+                return
+            if self.parent_entity_type != Schedule.TYPE_EPIC:
+                raise ValidationError(
+                    _("User story schedule order items can only be grouped by epic parent.")
+                )
+            return
+
+        if self.entity_type == Schedule.TYPE_TASK:
+            if is_root_parent:
+                return
+            if self.parent_entity_type != Schedule.TYPE_USERSTORY:
+                raise ValidationError(
+                    _("Task schedule order items can only be grouped by user story parent.")
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return "{}:{}@{}".format(self.entity_type, self.schedule_id, self.position)

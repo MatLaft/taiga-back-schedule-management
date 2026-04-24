@@ -117,11 +117,13 @@ def _epic_post_delete(sender, instance, **kwargs):
 
 
 def _related_userstory_post_save(sender, instance, created, **kwargs):
+    services.sync_schedule_item_order(services.ENTITY_USERSTORY, instance.user_story_id)
     services.sync_userstory_and_tasks_schedule_color(instance.user_story_id)
     services.ensure_epic_bounds_for_userstory(instance.user_story_id)
 
 
 def _related_userstory_post_delete(sender, instance, **kwargs):
+    services.sync_schedule_item_order(services.ENTITY_USERSTORY, instance.user_story_id)
     services.sync_userstory_and_tasks_schedule_color(instance.user_story_id)
     services.ensure_epic_bounds_for_userstory(instance.user_story_id)
 
