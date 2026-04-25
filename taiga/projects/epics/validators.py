@@ -37,6 +37,7 @@ class EpicValidator(AssignedToValidator, WatchersValidator, EditableWatchedResou
     actual_start = serializers.DateField(required=False)
     estimated_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
     actual_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
+    position = serializers.IntegerField(required=False, min_value=1)
 
     class Meta:
         model = models.Epic

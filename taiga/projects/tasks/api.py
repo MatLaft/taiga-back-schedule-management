@@ -152,7 +152,39 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
     def _taskboard_order_key(self, obj):
         return "{}-{}-{}-{}".format(obj.project_id, obj.user_story_id, obj.status_id, obj.taskboard_order)
 
+    def _get_requested_schedule_position(self):
+        raw_position = self.request.DATA.get("position", None)
+        if raw_position is None:
+            return None
+
+        try:
+            position = int(raw_position)
+        except (TypeError, ValueError):
+            raise exc.WrongArguments(_("'position' must be an integer value."))
+
+        if position < 1:
+            raise exc.WrongArguments(
+                _("The schedule order position must be greater than zero.")
+            )
+
+        return position
+
+    def _persist_schedule_position_if_needed(self, obj):
+        requested_position = getattr(self, "_requested_schedule_position", None)
+        if requested_position is None:
+            return
+
+        item_order = schedule_services.set_schedule_item_order_position(
+            schedule_services.ENTITY_TASK,
+            obj.id,
+            requested_position,
+        )
+        if item_order is not None:
+            setattr(obj, "schedule_position", item_order.position)
+
     def pre_save(self, obj):
+        self._requested_schedule_position = self._get_requested_schedule_position()
+
         if obj.user_story:
             obj.milestone = obj.user_story.milestone
         if not obj.id:
@@ -227,6 +259,7 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
             self.headers["Taiga-Info-Order-Updated"] = json.dumps(orders_updated)
 
         self._persist_schedule_color_if_needed(obj)
+        self._persist_schedule_position_if_needed(obj)
 
         super().post_save(obj, created)
 

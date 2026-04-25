@@ -167,6 +167,36 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
     def _sprint_order_key(self, obj):
         return f"{obj.project_id}-{obj.milestone_id}-{obj.sprint_order}"
 
+    def _get_requested_schedule_position(self):
+        raw_position = self.request.DATA.get("position", None)
+        if raw_position is None:
+            return None
+
+        try:
+            position = int(raw_position)
+        except (TypeError, ValueError):
+            raise exc.WrongArguments(_("'position' must be an integer value."))
+
+        if position < 1:
+            raise exc.WrongArguments(
+                _("The schedule order position must be greater than zero.")
+            )
+
+        return position
+
+    def _persist_schedule_position_if_needed(self, obj):
+        requested_position = getattr(self, "_requested_schedule_position", None)
+        if requested_position is None:
+            return
+
+        item_order = schedule_services.set_schedule_item_order_position(
+            schedule_services.ENTITY_USERSTORY,
+            obj.id,
+            requested_position,
+        )
+        if item_order is not None:
+            setattr(obj, "schedule_position", item_order.position)
+
     def _add_taiga_info_headers(self):
         try:
             project_id = int(self.request.QUERY_PARAMS.get("project", None))
@@ -233,6 +263,8 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
             raise exc.WrongArguments(ancestor_dependency_error)
 
     def pre_save(self, obj):
+        self._requested_schedule_position = self._get_requested_schedule_position()
+
         # ## start-hack-reorder ##
         if obj.id:
             if self._old_kanban_order_key != self._kanban_order_key(self.object):
@@ -340,6 +372,7 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
         # ## end-hack-rolepoints ##
 
         self._persist_schedule_color_if_needed(obj)
+        self._persist_schedule_position_if_needed(obj)
 
         super().post_save(obj, created)
 

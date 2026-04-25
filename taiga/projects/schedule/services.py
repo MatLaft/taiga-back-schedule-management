@@ -93,12 +93,27 @@ def _fetch_group_items_for_update(group_key):
 
 
 def _persist_group_positions(items):
+    pending_updates = []
     for index, item in enumerate(items, start=1):
         if item.position == index:
             continue
+        pending_updates.append((item, index))
 
-        ScheduleItemOrder.objects.filter(id=item.id).update(position=index)
-        item.position = index
+    if not pending_updates:
+        return
+
+    # Avoid transient UNIQUE collisions while reindexing siblings.
+    current_max_position = max([item.position for item in items] + [len(items)])
+    temporary_base_position = current_max_position + len(pending_updates) + 1
+
+    for offset, (item, _) in enumerate(pending_updates):
+        temporary_position = temporary_base_position + offset
+        ScheduleItemOrder.objects.filter(id=item.id).update(position=temporary_position)
+        item.position = temporary_position
+
+    for item, final_position in pending_updates:
+        ScheduleItemOrder.objects.filter(id=item.id).update(position=final_position)
+        item.position = final_position
 
 
 def _move_order_item_between_groups(item_order, target_group_key, target_position=None):
