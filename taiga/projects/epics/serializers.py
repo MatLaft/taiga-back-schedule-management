@@ -28,6 +28,7 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     id = Field()
     schedule_id = MethodField()
+    schedule_position = MethodField()
     ref = Field()
     project = Field(attr="project_id")
     created_date = Field()
@@ -58,6 +59,9 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     def get_schedule_id(self, obj):
         return getattr(obj, "schedule_id", None)
+
+    def get_schedule_position(self, obj):
+        return getattr(obj, "schedule_position", None)
 
     def get_due_date(self, obj):
         return getattr(obj, "schedule_due_date", None)

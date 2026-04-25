@@ -86,6 +86,7 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
                     "actual_start",
                     "estimated_hours",
                     "actual_hours",
+                    "position",
                 ),
             )
 

@@ -150,6 +150,7 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
                     "estimated_hours",
                     "actual_hours",
                     "color",
+                    "position",
                 ),
             )
         return qs

@@ -43,6 +43,7 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
 
     id = Field()
     schedule_id = MethodField()
+    schedule_position = MethodField()
     ref = Field()
     milestone = Field(attr="milestone_id")
     milestone_slug = MethodField()
@@ -124,6 +125,9 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
 
     def get_schedule_id(self, obj):
         return getattr(obj, "schedule_id", None)
+
+    def get_schedule_position(self, obj):
+        return getattr(obj, "schedule_position", None)
 
     def get_estimated_start(self, obj):
         return getattr(obj, "schedule_estimated_start", None)

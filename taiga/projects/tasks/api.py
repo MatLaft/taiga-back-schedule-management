@@ -105,6 +105,7 @@ class TaskViewSet(AssignedToSignalMixin, OCCResourceMixin, VotedResourceMixin,
                     "estimated_hours",
                     "actual_hours",
                     "color",
+                    "position",
                 ),
             )
 

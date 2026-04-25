@@ -7,6 +7,8 @@
 
 import pytest
 
+from django.apps import apps
+
 from taiga.projects.epics.models import RelatedUserStory
 from taiga.projects.schedule import services as schedule_services
 from taiga.projects.schedule.models import ScheduleItemOrder
@@ -196,3 +198,23 @@ def test_schedule_item_order_sync_keeps_position_when_parent_group_is_unchanged(
         (task_2.id, 2),
         (task_3.id, 3),
     ]
+
+
+def test_attach_schedule_fields_returns_schedule_position():
+    project = factories.create_project()
+    userstory = factories.create_userstory(project=project)
+    task = factories.create_task(project=project, user_story=userstory)
+
+    _upsert_schedule(schedule_services.ENTITY_TASK, task.id, project.id)
+
+    task_model = apps.get_model("tasks", "Task")
+    queryset = schedule_services.attach_schedule_fields(
+        task_model.objects.filter(id=task.id),
+        schedule_services.ENTITY_TASK,
+        ("id", "position"),
+    )
+
+    task_with_schedule = queryset.first()
+    assert task_with_schedule is not None
+    assert getattr(task_with_schedule, "schedule_id", None) is not None
+    assert getattr(task_with_schedule, "schedule_position", None) == 1

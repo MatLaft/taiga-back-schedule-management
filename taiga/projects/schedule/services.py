@@ -353,24 +353,43 @@ def attach_schedule_fields(queryset, entity_type, field_names):
     model = queryset.model
     model_table = model._meta.db_table
     schedule_table = Schedule._meta.db_table
+    schedule_item_order_table = ScheduleItemOrder._meta.db_table
 
     select = {}
     for field_name in field_names:
         select_key = "schedule_{}".format(field_name)
-        sql = (
-            'SELECT "{schedule_table}"."{field_name}" '
-            'FROM "{schedule_table}" '
-            "WHERE "
-            '"{schedule_table}"."entity_type" = \'{entity_type}\' '
-            "AND "
-            '"{schedule_table}"."entity_id" = "{model_table}"."id" '
-            "LIMIT 1"
-        ).format(
-            schedule_table=schedule_table,
-            field_name=field_name,
-            entity_type=entity_type,
-            model_table=model_table,
-        )
+        if field_name == "position":
+            sql = (
+                'SELECT "{schedule_item_order_table}"."position" '
+                'FROM "{schedule_item_order_table}" '
+                'INNER JOIN "{schedule_table}" '
+                'ON "{schedule_table}"."id" = "{schedule_item_order_table}"."schedule_id" '
+                "WHERE "
+                '"{schedule_table}"."entity_type" = \'{entity_type}\' '
+                "AND "
+                '"{schedule_table}"."entity_id" = "{model_table}"."id" '
+                "LIMIT 1"
+            ).format(
+                schedule_item_order_table=schedule_item_order_table,
+                schedule_table=schedule_table,
+                entity_type=entity_type,
+                model_table=model_table,
+            )
+        else:
+            sql = (
+                'SELECT "{schedule_table}"."{field_name}" '
+                'FROM "{schedule_table}" '
+                "WHERE "
+                '"{schedule_table}"."entity_type" = \'{entity_type}\' '
+                "AND "
+                '"{schedule_table}"."entity_id" = "{model_table}"."id" '
+                "LIMIT 1"
+            ).format(
+                schedule_table=schedule_table,
+                field_name=field_name,
+                entity_type=entity_type,
+                model_table=model_table,
+            )
         select[select_key] = sql
 
     if select:

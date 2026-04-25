@@ -31,6 +31,7 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     id = Field()
     schedule_id = MethodField()
+    schedule_position = MethodField()
     user_story = Field(attr="user_story_id")
     ref = Field()
     project = Field(attr="project_id")
@@ -69,6 +70,9 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     def get_schedule_id(self, obj):
         return getattr(obj, "schedule_id", None)
+
+    def get_schedule_position(self, obj):
+        return getattr(obj, "schedule_position", None)
 
     def get_estimated_start(self, obj):
         return getattr(obj, "schedule_estimated_start", None)
