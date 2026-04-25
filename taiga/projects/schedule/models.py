@@ -92,6 +92,32 @@ class ScheduleDependency(models.Model):
         verbose_name_plural = "schedule dependencies"
         unique_together = (("from_schedule", "to_schedule"),)
 
+    @property
+    def project_id(self):
+        if self.from_schedule_id and getattr(self, "from_schedule", None):
+            return self.from_schedule.project_id
+
+        if self.to_schedule_id and getattr(self, "to_schedule", None):
+            return self.to_schedule.project_id
+
+        if self.from_schedule_id:
+            project_id = (
+                Schedule.objects.filter(id=self.from_schedule_id)
+                .values_list("project_id", flat=True)
+                .first()
+            )
+            if project_id is not None:
+                return project_id
+
+        if self.to_schedule_id:
+            return (
+                Schedule.objects.filter(id=self.to_schedule_id)
+                .values_list("project_id", flat=True)
+                .first()
+            )
+
+        return None
+
     def clean(self):
         super().clean()
 

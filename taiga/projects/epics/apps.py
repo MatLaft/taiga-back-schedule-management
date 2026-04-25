@@ -49,6 +49,7 @@ def disconnect_all_epics_signals():
 class EpicsAppConfig(AppConfig):
     name = "taiga.projects.epics"
     verbose_name = "Epics"
+    watched_types = ["epics.epic"]
 
     def ready(self):
         connect_all_epics_signals()

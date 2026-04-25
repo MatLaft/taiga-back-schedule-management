@@ -11,6 +11,7 @@ from django.apps import AppConfig
 class ScheduleAppConfig(AppConfig):
     name = "taiga.projects.schedule"
     verbose_name = "Schedule"
+    watched_types = ["schedule.scheduledependency"]
 
     def ready(self):
         from . import signals as schedule_signals
