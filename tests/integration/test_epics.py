@@ -17,11 +17,28 @@ from taiga.permissions.choices import MEMBERS_PERMISSIONS, ANON_PERMISSIONS
 from taiga.projects.epics import services
 from taiga.projects.epics import models
 from taiga.projects.occ import OCCResourceMixin
+from taiga.projects.schedule import services as schedule_services
+from taiga.projects.schedule.models import ScheduleItemOrder
 
 from .. import factories as f
 
 import pytest
 pytestmark = pytest.mark.django_db
+
+
+def _get_epic_userstory_schedule_ids(project_id, epic_id):
+    rows = (
+        ScheduleItemOrder.objects
+        .filter(
+            project_id=project_id,
+            entity_type=schedule_services.ENTITY_USERSTORY,
+            parent_entity_type=schedule_services.ENTITY_EPIC,
+            parent_entity_id=epic_id,
+        )
+        .select_related("schedule")
+        .order_by("position", "id")
+    )
+    return [row.schedule.entity_id for row in rows]
 
 
 def test_get_invalid_csv(client):
@@ -103,6 +120,76 @@ def test_bulk_create_related_userstories(client):
     response = client.json.post(url, json.dumps(data))
     assert response.status_code == 200
     assert len(response.data) == 2
+
+    expected_userstory_ids = list(
+        epic.relateduserstory_set
+        .order_by("order", "id")
+        .values_list("user_story_id", flat=True)
+    )
+    assert _get_epic_userstory_schedule_ids(project.id, epic.id) == expected_userstory_ids
+
+
+def test_bulk_created_related_userstories_allow_schedule_reordering(client):
+    user = f.UserFactory.create()
+    project = f.ProjectFactory.create(owner=user)
+    epic = f.EpicFactory.create(project=project)
+    f.MembershipFactory.create(project=project, user=user, is_admin=True)
+
+    url = reverse('epics-related-userstories-bulk-create', args=[epic.pk])
+    data = {
+        "bulk_userstories": "test1\ntest2\ntest3",
+        "project_id": project.id
+    }
+
+    client.login(user)
+    response = client.json.post(url, json.dumps(data))
+    assert response.status_code == 200
+
+    ordered_userstory_ids = list(
+        epic.relateduserstory_set
+        .order_by("order", "id")
+        .values_list("user_story_id", flat=True)
+    )
+    assert len(ordered_userstory_ids) == 3
+
+    us_1, us_2, us_3 = ordered_userstory_ids
+    moved_item = schedule_services.set_schedule_item_order_position(
+        schedule_services.ENTITY_USERSTORY,
+        us_3,
+        1,
+    )
+
+    assert moved_item is not None
+    assert moved_item.position == 1
+    assert _get_epic_userstory_schedule_ids(project.id, epic.id) == [
+        us_3,
+        us_1,
+        us_2,
+    ]
+
+
+def test_update_related_userstories_order_in_bulk_updates_schedule_order():
+    project = f.ProjectFactory.create()
+    epic = f.EpicFactory.create(project=project)
+    us_1 = f.UserStoryFactory.create(project=project)
+    us_2 = f.UserStoryFactory.create(project=project)
+    us_3 = f.UserStoryFactory.create(project=project)
+
+    f.RelatedUserStory.create(epic=epic, user_story=us_1, order=1)
+    f.RelatedUserStory.create(epic=epic, user_story=us_2, order=2)
+    f.RelatedUserStory.create(epic=epic, user_story=us_3, order=3)
+
+    services.update_epic_related_userstories_order_in_bulk(
+        [{"us_id": us_3.id, "order": 1}],
+        epic=epic,
+    )
+
+    expected_userstory_ids = list(
+        epic.relateduserstory_set
+        .order_by("order", "id")
+        .values_list("user_story_id", flat=True)
+    )
+    assert _get_epic_userstory_schedule_ids(project.id, epic.id) == expected_userstory_ids
 
 
 def test_bulk_create_related_userstories_with_default_swimlane_and_kanban_enable(client):

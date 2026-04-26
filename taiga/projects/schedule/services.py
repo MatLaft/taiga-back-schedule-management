@@ -9,6 +9,7 @@ from collections import deque
 from datetime import timedelta
 
 from django.apps import apps
+from django.db import IntegrityError
 from django.db import OperationalError
 from django.db import ProgrammingError
 from django.db import transaction
@@ -26,6 +27,7 @@ _UNSET = object()
 _ALLOWED_ENTITIES = {ENTITY_EPIC, ENTITY_USERSTORY, ENTITY_TASK}
 _ROOT_PARENT_ENTITY_TYPE = ScheduleItemOrder.ROOT_PARENT_ENTITY_TYPE
 _ROOT_PARENT_ENTITY_ID = ScheduleItemOrder.ROOT_PARENT_ENTITY_ID
+_SCHEDULE_ITEM_ORDER_RETRY_LIMIT = 3
 
 
 def _assert_entity_type(entity_type):
@@ -140,10 +142,6 @@ def _move_order_item_between_groups(item_order, target_group_key, target_positio
     group_keys = sorted(set([current_group_key, target_group_key]))
     locked_groups = {key: _fetch_group_items_for_update(key) for key in group_keys}
 
-    current_group_items = locked_groups.get(current_group_key, [])
-    remaining_current_items = [item for item in current_group_items if item.id != item_order.id]
-    _persist_group_positions(remaining_current_items)
-
     target_group_items = locked_groups.get(target_group_key, [])
     max_target_position = len(target_group_items) + 1
     desired_position = max_target_position if target_position is None else int(target_position)
@@ -167,6 +165,10 @@ def _move_order_item_between_groups(item_order, target_group_key, target_positio
     item_order.parent_entity_type = next_parent_entity_type
     item_order.parent_entity_id = next_parent_entity_id
     item_order.position = max_target_position
+
+    current_group_items = locked_groups.get(current_group_key, [])
+    remaining_current_items = [item for item in current_group_items if item.id != item_order.id]
+    _persist_group_positions(remaining_current_items)
 
     reordered_target_items = [item for item in target_group_items if item.id != item_order.id]
     reordered_target_items.insert(desired_position - 1, item_order)
@@ -208,6 +210,18 @@ def _sync_schedule_item_order_for_schedule(schedule):
     return _move_order_item_between_groups(item_order, target_group_key)
 
 
+def _run_schedule_item_order_operation_with_retries(operation):
+    # Concurrent writes can race while computing sibling positions. Retry the
+    # transaction to resolve transient UNIQUE collisions on (group, position).
+    for attempt in range(_SCHEDULE_ITEM_ORDER_RETRY_LIMIT):
+        try:
+            with transaction.atomic():
+                return operation()
+        except IntegrityError:
+            if attempt == _SCHEDULE_ITEM_ORDER_RETRY_LIMIT - 1:
+                raise
+
+
 def sync_schedule_item_order(entity_type, entity_id):
     _assert_entity_type(entity_type)
     schedule = get_schedule(entity_type, entity_id)
@@ -215,8 +229,14 @@ def sync_schedule_item_order(entity_type, entity_id):
         return None
 
     try:
-        with transaction.atomic():
-            return _sync_schedule_item_order_for_schedule(schedule)
+        return _run_schedule_item_order_operation_with_retries(
+            lambda: _sync_schedule_item_order_for_schedule(schedule)
+        )
+    except IntegrityError:
+        try:
+            return ScheduleItemOrder.objects.filter(schedule_id=schedule.id).first()
+        except (ProgrammingError, OperationalError):
+            return None
     except (ProgrammingError, OperationalError):
         return None
 
@@ -248,21 +268,125 @@ def set_schedule_item_order_position(entity_type, entity_id, position):
         return None
 
     try:
-        with transaction.atomic():
-            item_order = _sync_schedule_item_order_for_schedule(schedule)
-            current_group_key = _build_order_group_key(
-                item_order.project_id,
-                item_order.entity_type,
-                item_order.parent_entity_type,
-                item_order.parent_entity_id,
-            )
-            return _move_order_item_between_groups(
-                item_order,
-                current_group_key,
-                target_position=desired_position,
-            )
+        return _run_schedule_item_order_operation_with_retries(
+            lambda: _set_schedule_item_order_position_for_schedule(schedule, desired_position)
+        )
+    except IntegrityError:
+        try:
+            return ScheduleItemOrder.objects.filter(schedule_id=schedule.id).first()
+        except (ProgrammingError, OperationalError):
+            return None
     except (ProgrammingError, OperationalError):
         return None
+
+
+def _set_schedule_item_order_position_for_schedule(schedule, desired_position):
+    item_order = _sync_schedule_item_order_for_schedule(schedule)
+    current_group_key = _build_order_group_key(
+        item_order.project_id,
+        item_order.entity_type,
+        item_order.parent_entity_type,
+        item_order.parent_entity_id,
+    )
+    return _move_order_item_between_groups(
+        item_order,
+        current_group_key,
+        target_position=desired_position,
+    )
+
+
+def _sync_epic_userstories_schedule_item_order_for_epic(
+    project_id,
+    epic_id,
+    ordered_schedules,
+):
+    target_group_key = _build_order_group_key(
+        project_id,
+        ENTITY_USERSTORY,
+        ENTITY_EPIC,
+        epic_id,
+    )
+
+    ordered_items = []
+    for schedule in ordered_schedules:
+        item_order = _sync_schedule_item_order_for_schedule(schedule)
+        if item_order is None:
+            continue
+        if (
+            item_order.entity_type != ENTITY_USERSTORY
+            or item_order.parent_entity_type != ENTITY_EPIC
+            or item_order.parent_entity_id != epic_id
+        ):
+            continue
+        ordered_items.append(item_order)
+
+    if not ordered_items:
+        return []
+
+    group_items = _fetch_group_items_for_update(target_group_key)
+    ordered_item_ids = {item.id for item in ordered_items}
+    remaining_items = [item for item in group_items if item.id not in ordered_item_ids]
+    _persist_group_positions(ordered_items + remaining_items)
+    return ordered_items
+
+
+def sync_epic_userstories_schedule_item_order_in_bulk(epic_id):
+    if not epic_id:
+        return []
+
+    try:
+        epic_model = apps.get_model("epics", "Epic")
+        related_model = apps.get_model("epics", "RelatedUserStory")
+        epic = (
+            epic_model.objects
+            .filter(id=epic_id)
+            .values("id", "project_id")
+            .first()
+        )
+    except (ProgrammingError, OperationalError):
+        return []
+
+    if epic is None:
+        return []
+
+    try:
+        ordered_userstory_ids = list(
+            related_model.objects
+            .filter(epic_id=epic_id)
+            .order_by("order", "id")
+            .values_list("user_story_id", flat=True)
+        )
+    except (ProgrammingError, OperationalError):
+        return []
+
+    if not ordered_userstory_ids:
+        return []
+
+    ordered_schedules = []
+    for userstory_id in ordered_userstory_ids:
+        schedule = get_schedule(ENTITY_USERSTORY, userstory_id)
+        if schedule is None:
+            schedule = upsert_schedule(
+                ENTITY_USERSTORY,
+                userstory_id,
+                project_id=epic["project_id"],
+            )
+        if schedule is not None:
+            ordered_schedules.append(schedule)
+
+    if not ordered_schedules:
+        return []
+
+    try:
+        return _run_schedule_item_order_operation_with_retries(
+            lambda: _sync_epic_userstories_schedule_item_order_for_epic(
+                epic["project_id"],
+                epic_id,
+                ordered_schedules,
+            )
+        )
+    except (IntegrityError, ProgrammingError, OperationalError):
+        return []
 
 
 def get_schedule(entity_type, entity_id):
@@ -293,6 +417,7 @@ def delete_schedule(entity_type, entity_id):
                 .first()
             )
             if item_order is not None:
+                item_order_id = item_order.id
                 group_key = _build_order_group_key(
                     item_order.project_id,
                     item_order.entity_type,
@@ -301,7 +426,7 @@ def delete_schedule(entity_type, entity_id):
                 )
                 group_items = _fetch_group_items_for_update(group_key)
                 item_order.delete()
-                remaining_items = [item for item in group_items if item.id != item_order.id]
+                remaining_items = [item for item in group_items if item.id != item_order_id]
                 _persist_group_positions(remaining_items)
 
             Schedule.objects.filter(id=schedule.id).delete()

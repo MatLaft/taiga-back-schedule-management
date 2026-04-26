@@ -117,6 +117,9 @@ def create_related_userstories_in_bulk(bulk_data, epic, **additional_fields):
                 models.RelatedUserStory(user_story=userstory, epic=epic)
             )
         db.save_in_bulk(related_userstories)
+        from taiga.projects.schedule import services as schedule_services
+
+        schedule_services.sync_epic_userstories_schedule_item_order_in_bulk(epic.id)
         project.update_role_points(user_stories=userstories)
     finally:
         connect_userstories_signals()
@@ -156,6 +159,8 @@ def update_epic_related_userstories_order_in_bulk(bulk_data: list, epic: object)
         db.update_attr_in_bulk_for_ids(rus_orders, "order", models.RelatedUserStory)
 
         from taiga.projects.schedule import services as schedule_services
+
+        schedule_services.sync_epic_userstories_schedule_item_order_in_bulk(epic.id)
 
         affected_userstory_ids = {
             item["us_id"] for item in bulk_data if item["us_id"] in rus_conversion

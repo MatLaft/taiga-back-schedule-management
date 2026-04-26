@@ -8,6 +8,7 @@
 import pytest
 
 from django.apps import apps
+from django.db import IntegrityError
 
 from taiga.projects.epics.models import RelatedUserStory
 from taiga.projects.schedule import services as schedule_services
@@ -218,3 +219,59 @@ def test_attach_schedule_fields_returns_schedule_position():
     assert task_with_schedule is not None
     assert getattr(task_with_schedule, "schedule_id", None) is not None
     assert getattr(task_with_schedule, "schedule_position", None) == 1
+
+
+def test_schedule_item_order_sync_retries_after_transient_integrity_error(monkeypatch):
+    project = factories.create_project()
+    userstory = factories.create_userstory(project=project)
+
+    call_count = {"value": 0}
+    original_sync_for_schedule = schedule_services._sync_schedule_item_order_for_schedule
+
+    def flaky_sync_for_schedule(schedule):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            raise IntegrityError("transient unique violation")
+        return original_sync_for_schedule(schedule)
+
+    monkeypatch.setattr(
+        schedule_services,
+        "_sync_schedule_item_order_for_schedule",
+        flaky_sync_for_schedule,
+    )
+
+    result = schedule_services.sync_schedule_item_order(
+        schedule_services.ENTITY_USERSTORY,
+        userstory.id,
+    )
+
+    assert result is not None
+    assert call_count["value"] == 2
+
+
+def test_schedule_item_order_sync_returns_existing_order_after_retry_exhaustion(monkeypatch):
+    project = factories.create_project()
+    userstory = factories.create_userstory(project=project)
+
+    existing_item_order = schedule_services.get_schedule_item_order(
+        schedule_services.ENTITY_USERSTORY,
+        userstory.id,
+    )
+    assert existing_item_order is not None
+
+    def always_fails(_schedule):
+        raise IntegrityError("persistent unique violation")
+
+    monkeypatch.setattr(
+        schedule_services,
+        "_sync_schedule_item_order_for_schedule",
+        always_fails,
+    )
+
+    result = schedule_services.sync_schedule_item_order(
+        schedule_services.ENTITY_USERSTORY,
+        userstory.id,
+    )
+
+    assert result is not None
+    assert result.id == existing_item_order.id

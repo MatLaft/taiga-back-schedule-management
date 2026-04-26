@@ -334,12 +334,13 @@ class EpicRelatedUserStoryViewSet(NestedViewSetMixin, HistoryResourceMixin,
         if project.blocked_code is not None:
             raise exc.Blocked(_("Blocked element"))
 
-        related_userstories = services.create_related_userstories_in_bulk(
-            data["bulk_userstories"],
-            epic,
-            project=project,
-            owner=request.user
-        )
+        with advisory_lock("epic-related-user-stories-creation-{}".format(epic.id)):
+            related_userstories = services.create_related_userstories_in_bulk(
+                data["bulk_userstories"],
+                epic,
+                project=project,
+                owner=request.user
+            )
 
         for related_userstory in related_userstories:
             self.persist_history_snapshot(obj=related_userstory)
