@@ -6,6 +6,8 @@
 # Copyright (c) 2021-present Kaleidos INC
 
 from taiga.base.api import validators
+from taiga.base.api import serializers
+from taiga.base.exceptions import ValidationError
 
 from . import models
 
@@ -14,3 +16,32 @@ class ScheduleDependencyValidator(validators.ModelValidator):
     class Meta:
         model = models.ScheduleDependency
         read_only_fields = ("id",)
+
+
+class _ScheduleBulkDateUpdateValidator(validators.Validator):
+    entity_type = serializers.ChoiceField(
+        choices=(
+            (models.Schedule.TYPE_EPIC, models.Schedule.TYPE_EPIC),
+            (models.Schedule.TYPE_USERSTORY, models.Schedule.TYPE_USERSTORY),
+            (models.Schedule.TYPE_TASK, models.Schedule.TYPE_TASK),
+        )
+    )
+    entity_id = serializers.IntegerField(min_value=1)
+    start_field = serializers.ChoiceField(
+        required=False,
+        choices=(("estimated_start", "estimated_start"), ("actual_start", "actual_start")),
+    )
+    start = serializers.DateField(required=False)
+    due = serializers.DateField(required=False)
+
+
+class ScheduleBulkApplyDatesValidator(validators.Validator):
+    project_id = serializers.IntegerField(min_value=1)
+    bulk_updates = _ScheduleBulkDateUpdateValidator(many=True)
+
+    def validate_bulk_updates(self, attrs, source):
+        bulk_updates = attrs.get(source) or []
+        if not bulk_updates:
+            raise ValidationError("At least one bulk update is required.")
+
+        return attrs

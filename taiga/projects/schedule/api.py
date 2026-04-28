@@ -6,9 +6,12 @@
 # Copyright (c) 2021-present Kaleidos INC
 
 from django.utils.translation import gettext as _
+from django_pglocks import advisory_lock
 
 from taiga.base import exceptions as exc
 from taiga.base import filters as base_filters
+from taiga.base import response
+from taiga.base.decorators import list_route
 from taiga.base.api import ModelCrudViewSet
 from taiga.permissions import services as permissions_service
 from taiga.projects.models import Project
@@ -16,6 +19,7 @@ from taiga.projects.models import Project
 from . import models
 from . import permissions
 from . import serializers
+from . import services
 from . import validators
 
 
@@ -111,3 +115,26 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
 
         project_id = obj.from_schedule.project_id if obj and obj.from_schedule_id else None
         self._check_project_access(project_id, for_write=True)
+
+    @list_route(methods=["POST"])
+    def bulk_apply_dates(self, request, **kwargs):
+        validator = validators.ScheduleBulkApplyDatesValidator(data=request.DATA)
+        if not validator.is_valid():
+            return response.BadRequest(validator.errors)
+
+        # Use deserialized values (e.g. DateField -> datetime.date) instead of
+        # serialized representation to keep type-safe schedule validations.
+        data = validator.object
+        project_id = data["project_id"]
+        self._check_project_access(project_id, for_write=True)
+
+        try:
+            with advisory_lock("schedule-bulk-apply-dates-{}".format(project_id)):
+                normalized_updates = services.apply_schedule_dates_in_bulk(
+                    project_id,
+                    data["bulk_updates"],
+                )
+        except ValueError as err:
+            raise exc.WrongArguments(str(err))
+
+        return response.Ok({"updated": len(normalized_updates)})

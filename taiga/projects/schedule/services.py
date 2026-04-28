@@ -7,6 +7,7 @@
 
 from collections import deque
 from datetime import timedelta
+from types import SimpleNamespace
 
 from django.apps import apps
 from django.db import IntegrityError
@@ -14,6 +15,8 @@ from django.db import OperationalError
 from django.db import ProgrammingError
 from django.db import transaction
 from django.utils.translation import gettext as _
+
+from taiga.events import events
 
 from .models import Schedule
 from .models import ScheduleItemOrder
@@ -1283,3 +1286,247 @@ def sync_epic_related_schedule_colors(epic_id):
 
     for userstory_id in userstory_ids:
         sync_userstory_and_tasks_schedule_color(userstory_id)
+
+
+def _normalize_schedule_bulk_date_updates(bulk_updates):
+    normalized_by_key = {}
+
+    for update in bulk_updates or []:
+        if not isinstance(update, dict):
+            raise ValueError(_("Each bulk schedule update must be an object."))
+
+        entity_type = update.get("entity_type")
+        entity_id = update.get("entity_id")
+
+        if entity_type not in _ALLOWED_ENTITIES:
+            raise ValueError(_("Invalid entity type for schedule bulk update."))
+
+        try:
+            entity_id = int(entity_id)
+        except (TypeError, ValueError):
+            raise ValueError(_("Invalid entity id for schedule bulk update."))
+
+        if entity_id < 1:
+            raise ValueError(_("Invalid entity id for schedule bulk update."))
+
+        start_field = update.get("start_field") or "estimated_start"
+        if start_field not in ("estimated_start", "actual_start"):
+            raise ValueError(_("Invalid start field for schedule bulk update."))
+
+        normalized_by_key[(entity_type, entity_id)] = {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "start_field": start_field,
+            "start": update.get("start"),
+            "due": update.get("due"),
+        }
+
+    return sorted(
+        normalized_by_key.values(),
+        key=lambda item: (item["entity_type"], item["entity_id"]),
+    )
+
+
+def _lock_schedule_bulk_entities(project_id, normalized_updates):
+    entity_ids_by_type = {}
+    for update in normalized_updates:
+        entity_ids_by_type.setdefault(update["entity_type"], set()).add(update["entity_id"])
+
+    locked_entities = {}
+    for entity_type in sorted(entity_ids_by_type.keys()):
+        model = _get_model_for_entity_type(entity_type)
+        if model is None:
+            raise ValueError(_("Invalid entity type for schedule bulk update."))
+
+        entity_ids = sorted(entity_ids_by_type[entity_type])
+        entities = list(
+            model.objects
+            .select_for_update()
+            .filter(project_id=project_id, id__in=entity_ids)
+            .order_by("id")
+        )
+
+        entity_by_id = {entity.id: entity for entity in entities}
+        missing_ids = [entity_id for entity_id in entity_ids if entity_id not in entity_by_id]
+        if missing_ids:
+            raise ValueError(_("One or more entities do not belong to the selected project."))
+
+        for entity_id in entity_ids:
+            locked_entities[(entity_type, entity_id)] = entity_by_id[entity_id]
+
+    return locked_entities
+
+
+def _apply_schedule_bulk_updates(project_id, normalized_updates, locked_entities):
+    for update in normalized_updates:
+        entity_type = update["entity_type"]
+        entity_id = update["entity_id"]
+        start_field = update["start_field"]
+        start_value = update.get("start")
+        due_value = update.get("due")
+
+        schedule_data = {
+            "project_id": project_id,
+            "due_date": due_value,
+            start_field: start_value,
+        }
+        upsert_schedule(entity_type, entity_id, **schedule_data)
+
+        if entity_type not in (ENTITY_TASK, ENTITY_USERSTORY):
+            continue
+
+        model = _get_model_for_entity_type(entity_type)
+        if model is None:
+            continue
+
+        model.objects.filter(project_id=project_id, id=entity_id).update(due_date=due_value)
+
+        entity = locked_entities.get((entity_type, entity_id))
+        if entity is not None:
+            entity.due_date = due_value
+
+
+def _sync_schedule_bulk_side_effects(normalized_updates):
+    deduplicated_entities = []
+    seen_entities = set()
+
+    for update in normalized_updates:
+        entity_key = (update["entity_type"], update["entity_id"])
+        if entity_key in seen_entities:
+            continue
+        seen_entities.add(entity_key)
+        deduplicated_entities.append(entity_key)
+
+    # Mirror schedule signal behavior so bulk apply keeps dependency/ancestor
+    # synchronization consistent with single-entity saves.
+    for entity_type, entity_id in deduplicated_entities:
+        if entity_type == ENTITY_TASK:
+            ensure_userstory_and_epic_bounds_from_task(entity_id)
+        elif entity_type == ENTITY_USERSTORY:
+            ensure_epic_bounds_for_userstory(entity_id)
+
+    for entity_type, entity_id in deduplicated_entities:
+        propagate_dependency_chain_forward(entity_type, entity_id)
+
+
+def _build_schedule_validation_obj(entity_type, entity_id, locked_entities):
+    schedule = get_schedule(entity_type, entity_id)
+    if schedule is None:
+        raise ValueError(_("Couldn't find schedule data for one of the updated entities."))
+
+    entity = locked_entities.get((entity_type, entity_id))
+
+    data = {
+        "id": entity_id,
+        "estimated_start": schedule.estimated_start,
+        "actual_start": schedule.actual_start,
+    }
+
+    if entity_type == ENTITY_EPIC:
+        data["due_date"] = schedule.due_date
+    else:
+        data["due_date"] = getattr(entity, "due_date", None)
+
+    return SimpleNamespace(**data)
+
+
+def _validate_schedule_bulk_updates(normalized_updates, locked_entities):
+    for update in normalized_updates:
+        entity_type = update["entity_type"]
+        entity_id = update["entity_id"]
+
+        obj = _build_schedule_validation_obj(entity_type, entity_id, locked_entities)
+
+        if entity_type == ENTITY_TASK:
+            dependency_error = get_dependency_start_violation_error(obj, ENTITY_TASK)
+            if dependency_error:
+                raise ValueError(dependency_error)
+
+            ancestor_dependency_error = get_ancestor_dependency_start_violation_error(obj, ENTITY_TASK)
+            if ancestor_dependency_error:
+                raise ValueError(ancestor_dependency_error)
+
+            continue
+
+        if entity_type == ENTITY_USERSTORY:
+            bounds_error = get_userstory_bounds_violation_error(obj)
+            if bounds_error:
+                raise ValueError(bounds_error)
+
+            dependency_error = get_dependency_start_violation_error(obj, ENTITY_USERSTORY)
+            if dependency_error:
+                raise ValueError(dependency_error)
+
+            ancestor_dependency_error = get_ancestor_dependency_start_violation_error(obj, ENTITY_USERSTORY)
+            if ancestor_dependency_error:
+                raise ValueError(ancestor_dependency_error)
+            continue
+
+        if entity_type == ENTITY_EPIC:
+            bounds_error = get_epic_bounds_violation_error(obj)
+            if bounds_error:
+                raise ValueError(bounds_error)
+
+            dependency_error = get_dependency_start_violation_error(obj, ENTITY_EPIC)
+            if dependency_error:
+                raise ValueError(dependency_error)
+
+
+def _emit_schedule_bulk_change_events(project_id, normalized_updates):
+    entity_ids_by_content_type = {
+        "tasks.task": set(),
+        "userstories.userstory": set(),
+        "epics.epic": set(),
+    }
+    schedule_event_ids = set()
+
+    for update in normalized_updates:
+        entity_type = update["entity_type"]
+        entity_id = update["entity_id"]
+        schedule_event_ids.add(entity_id)
+
+        if entity_type == ENTITY_TASK:
+            entity_ids_by_content_type["tasks.task"].add(entity_id)
+        elif entity_type == ENTITY_USERSTORY:
+            entity_ids_by_content_type["userstories.userstory"].add(entity_id)
+        elif entity_type == ENTITY_EPIC:
+            entity_ids_by_content_type["epics.epic"].add(entity_id)
+
+    for content_type, entity_ids in entity_ids_by_content_type.items():
+        if not entity_ids:
+            continue
+        events.emit_event_for_ids(
+            ids=sorted(entity_ids),
+            content_type=content_type,
+            projectid=project_id,
+        )
+
+    if schedule_event_ids:
+        events.emit_event_for_ids(
+            ids=sorted(schedule_event_ids),
+            content_type="schedule.scheduledependency",
+            projectid=project_id,
+        )
+
+
+def apply_schedule_dates_in_bulk(project_id, bulk_updates):
+    try:
+        project_id = int(project_id)
+    except (TypeError, ValueError):
+        raise ValueError(_("Invalid project id for schedule bulk update."))
+
+    if project_id < 1:
+        raise ValueError(_("Invalid project id for schedule bulk update."))
+
+    normalized_updates = _normalize_schedule_bulk_date_updates(bulk_updates)
+    if not normalized_updates:
+        return []
+
+    with transaction.atomic():
+        locked_entities = _lock_schedule_bulk_entities(project_id, normalized_updates)
+        _apply_schedule_bulk_updates(project_id, normalized_updates, locked_entities)
+        _sync_schedule_bulk_side_effects(normalized_updates)
+        _validate_schedule_bulk_updates(normalized_updates, locked_entities)
+        _emit_schedule_bulk_change_events(project_id, normalized_updates)
+
+    return normalized_updates
