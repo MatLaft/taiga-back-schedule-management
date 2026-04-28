@@ -764,7 +764,7 @@ def get_dependency_start_violation_error(obj, entity_type):
     if schedule is None:
         return None
 
-    proposed_start, _ = _get_proposed_bounds_for_entity(obj, entity_type)
+    proposed_start = _get_proposed_bounds_for_entity(obj, entity_type)[0]
 
     try:
         dependency_model = apps.get_model("schedule", "ScheduleDependency")
@@ -852,7 +852,7 @@ def get_ancestor_dependency_start_violation_error(obj, entity_type):
     if obj is None or not getattr(obj, "id", None):
         return None
 
-    proposed_start, _ = _get_proposed_bounds_for_entity(obj, entity_type)
+    proposed_start = _get_proposed_bounds_for_entity(obj, entity_type)[0]
     if proposed_start is None:
         return None
 
@@ -984,6 +984,18 @@ def _shift_schedule_forward_to_start(schedule, required_start):
     return True, "due_date" in updates
 
 
+def _ensure_ancestor_bounds_for_dependency_target(schedule):
+    if schedule is None or not schedule.entity_id:
+        return
+
+    if schedule.entity_type == ENTITY_TASK:
+        ensure_userstory_and_epic_bounds_from_task(schedule.entity_id)
+        return
+
+    if schedule.entity_type == ENTITY_USERSTORY:
+        ensure_epic_bounds_for_userstory(schedule.entity_id)
+
+
 def propagate_dependency_chain_forward_from_schedule(schedule_id):
     if not schedule_id:
         return
@@ -1038,9 +1050,15 @@ def propagate_dependency_chain_forward_from_schedule(schedule_id):
                 continue
 
             shifted, due_changed = _shift_schedule_forward_to_start(target_schedule, required_start)
-            if shifted and due_changed and target_schedule.id not in queued:
-                queue.append(target_schedule.id)
-                queued.add(target_schedule.id)
+            if not shifted:
+                continue
+
+            if due_changed:
+                _ensure_ancestor_bounds_for_dependency_target(target_schedule)
+
+                if target_schedule.id not in queued:
+                    queue.append(target_schedule.id)
+                    queued.add(target_schedule.id)
 
 
 def propagate_dependency_chain_forward(entity_type, entity_id):

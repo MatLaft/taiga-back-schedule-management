@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from django.core.exceptions import ValidationError
 
+from taiga.projects.epics.models import RelatedUserStory
 from taiga.projects.schedule import services as schedule_services
 from taiga.projects.schedule.models import Schedule
 from taiga.projects.schedule.models import ScheduleDependency
@@ -337,3 +338,132 @@ def test_propagation_does_not_pull_targets_backwards():
     target.refresh_from_db()
     assert target.estimated_start == date(2026, 1, 13)
     assert target.due_date == date(2026, 1, 16)
+
+
+def test_propagation_expands_ancestors_for_shifted_targets_in_dependency_chain():
+    project = factories.create_project()
+
+    epic_1 = factories.create_epic(project=project)
+    epic_2 = factories.create_epic(project=project)
+
+    source_userstory = factories.create_userstory(project=project, due_date=date(2026, 1, 10))
+    target_userstory_1 = factories.create_userstory(project=project, due_date=date(2026, 1, 13))
+    target_userstory_2 = factories.create_userstory(project=project, due_date=date(2026, 1, 16))
+
+    RelatedUserStory.objects.create(epic=epic_1, user_story=source_userstory, order=1)
+    RelatedUserStory.objects.create(epic=epic_1, user_story=target_userstory_1, order=2)
+    RelatedUserStory.objects.create(epic=epic_2, user_story=target_userstory_2, order=1)
+
+    source_task = factories.create_task(
+        project=project,
+        user_story=source_userstory,
+        due_date=date(2026, 1, 10),
+    )
+    target_task_1 = factories.create_task(
+        project=project,
+        user_story=target_userstory_1,
+        due_date=date(2026, 1, 13),
+    )
+    target_task_2 = factories.create_task(
+        project=project,
+        user_story=target_userstory_2,
+        due_date=date(2026, 1, 16),
+    )
+
+    source_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        source_task.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 8),
+        due_date=date(2026, 1, 10),
+    )
+    target_schedule_1 = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        target_task_1.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 11),
+        due_date=date(2026, 1, 13),
+    )
+    target_schedule_2 = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        target_task_2.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 14),
+        due_date=date(2026, 1, 16),
+    )
+
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_USERSTORY,
+        target_userstory_1.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 11),
+        due_date=date(2026, 1, 13),
+    )
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_USERSTORY,
+        target_userstory_2.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 14),
+        due_date=date(2026, 1, 16),
+    )
+
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_EPIC,
+        epic_1.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 11),
+        due_date=date(2026, 1, 13),
+    )
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_EPIC,
+        epic_2.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 14),
+        due_date=date(2026, 1, 16),
+    )
+
+    ScheduleDependency.objects.create(
+        from_schedule=source_schedule,
+        to_schedule=target_schedule_1,
+    )
+    ScheduleDependency.objects.create(
+        from_schedule=target_schedule_1,
+        to_schedule=target_schedule_2,
+    )
+
+    Schedule.objects.filter(id=source_schedule.id).update(due_date=date(2026, 1, 14))
+    schedule_services.propagate_dependency_chain_forward_from_schedule(source_schedule.id)
+
+    target_schedule_1.refresh_from_db()
+    target_schedule_2.refresh_from_db()
+    target_userstory_1.refresh_from_db()
+    target_userstory_2.refresh_from_db()
+    target_userstory_schedule_1 = schedule_services.get_schedule(
+        schedule_services.ENTITY_USERSTORY,
+        target_userstory_1.id,
+    )
+    target_userstory_schedule_2 = schedule_services.get_schedule(
+        schedule_services.ENTITY_USERSTORY,
+        target_userstory_2.id,
+    )
+    epic_schedule_1 = schedule_services.get_schedule(
+        schedule_services.ENTITY_EPIC,
+        epic_1.id,
+    )
+    epic_schedule_2 = schedule_services.get_schedule(
+        schedule_services.ENTITY_EPIC,
+        epic_2.id,
+    )
+
+    assert target_schedule_1.estimated_start == date(2026, 1, 15)
+    assert target_schedule_1.due_date == date(2026, 1, 17)
+    assert target_schedule_2.estimated_start == date(2026, 1, 18)
+    assert target_schedule_2.due_date == date(2026, 1, 20)
+
+    assert target_userstory_1.due_date == date(2026, 1, 17)
+    assert target_userstory_2.due_date == date(2026, 1, 20)
+    assert target_userstory_schedule_1.due_date == date(2026, 1, 17)
+    assert target_userstory_schedule_2.due_date == date(2026, 1, 20)
+
+    assert epic_schedule_1.due_date == date(2026, 1, 17)
+    assert epic_schedule_2.due_date == date(2026, 1, 20)
