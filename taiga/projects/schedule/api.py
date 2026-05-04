@@ -44,14 +44,23 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
         )
         return Project.objects.filter(id=project_id).filter(filter_expression).exists()
 
-    def _user_can_modify_dependencies(self, project):
+    def _user_can_view_schedule_pages(self, project):
         return (
-            permissions_service.user_has_perm(self.request.user, "modify_epic", project)
-            or permissions_service.user_has_perm(self.request.user, "modify_us", project)
-            or permissions_service.user_has_perm(self.request.user, "modify_task", project)
+            permissions_service.user_has_perm(self.request.user, "view_schedule", project)
+            or permissions_service.user_has_perm(self.request.user, "view_gantt", project)
         )
 
-    def _check_project_access(self, project_id, for_write=False):
+    def _user_can_modify_dependencies(self, project):
+        return permissions_service.user_has_perm(
+            self.request.user, "modify_schedule_links", project
+        )
+
+    def _user_can_modify_schedule_dates(self, project):
+        return permissions_service.user_has_perm(
+            self.request.user, "modify_schedule_dates", project
+        )
+
+    def _check_project_access(self, project_id, for_write=False, for_dates_write=False):
         if project_id is None:
             raise exc.WrongArguments(_("Project is required."))
 
@@ -64,9 +73,19 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
                 _("You don't have permissions to access this project.")
             )
 
+        if not self._user_can_view_schedule_pages(project):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to access schedule or gantt data.")
+            )
+
         if for_write and not self._user_can_modify_dependencies(project):
             raise exc.PermissionDenied(
                 _("You don't have permissions to modify schedule dependencies.")
+            )
+
+        if for_dates_write and not self._user_can_modify_schedule_dates(project):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify schedule dates.")
             )
 
     def get_queryset(self):
@@ -75,12 +94,20 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
         requested_project_id = self._normalize_project_id(
             self.request.QUERY_PARAMS.get("project")
         )
+        if requested_project_id is not None:
+            self._check_project_access(requested_project_id)
+
         project_filter_expression = base_filters.get_filter_expression_can_view_projects(
             self.request.user, project_id=requested_project_id
         )
-        visible_project_ids = Project.objects.filter(project_filter_expression).values_list(
-            "id", flat=True
-        )
+        visible_projects = Project.objects.filter(project_filter_expression)
+        if requested_project_id is not None:
+            visible_projects = visible_projects.filter(id=requested_project_id)
+
+        visible_project_ids = []
+        for project in visible_projects:
+            if self._user_can_view_schedule_pages(project):
+                visible_project_ids.append(project.id)
 
         qs = qs.filter(
             from_schedule__project_id__in=visible_project_ids,
@@ -126,7 +153,7 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
         # serialized representation to keep type-safe schedule validations.
         data = validator.object
         project_id = data["project_id"]
-        self._check_project_access(project_id, for_write=True)
+        self._check_project_access(project_id, for_dates_write=True)
 
         try:
             with advisory_lock("schedule-bulk-apply-dates-{}".format(project_id)):

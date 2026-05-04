@@ -7,10 +7,13 @@
 
 from datetime import date
 from types import SimpleNamespace
+import json
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.test.client import Client
 
+from taiga.permissions.choices import MEMBERS_PERMISSIONS
 from taiga.projects.epics.models import RelatedUserStory
 from taiga.projects.schedule import services as schedule_services
 from taiga.projects.schedule.models import Schedule
@@ -29,6 +32,22 @@ def _create_schedule(entity_id, **kwargs):
     }
     data.update(kwargs)
     return Schedule.objects.create(**data)
+
+
+def _build_project_client(role_permissions=None):
+    project = factories.create_project()
+    owner = project.owner
+    if role_permissions is None:
+        role_permissions = [permission[0] for permission in MEMBERS_PERMISSIONS]
+    role = factories.RoleFactory.create(
+        project=project,
+        permissions=role_permissions,
+    )
+    factories.MembershipFactory.create(project=project, user=owner, role=role)
+
+    client = Client()
+    client.force_login(owner)
+    return project, client
 
 
 def test_schedule_dependency_accepts_target_start_after_source_due_date():
@@ -338,6 +357,75 @@ def test_propagation_does_not_pull_targets_backwards():
     target.refresh_from_db()
     assert target.estimated_start == date(2026, 1, 13)
     assert target.due_date == date(2026, 1, 16)
+
+
+def test_schedule_dependency_list_requires_schedule_or_gantt_view_permission():
+    role_permissions = [
+        permission[0]
+        for permission in MEMBERS_PERMISSIONS
+        if permission[0] not in ("view_schedule", "view_gantt")
+    ]
+    project, client = _build_project_client(role_permissions=role_permissions)
+
+    source = factories.create_task(project=project, due_date=date(2026, 1, 10))
+    target = factories.create_task(project=project, due_date=date(2026, 1, 13))
+    source_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        source.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 8),
+        due_date=date(2026, 1, 10),
+    )
+    target_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        target.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 11),
+        due_date=date(2026, 1, 13),
+    )
+    ScheduleDependency.objects.create(from_schedule=source_schedule, to_schedule=target_schedule)
+
+    response = client.get("/api/v1/schedule-dependencies?project={}".format(project.id))
+
+    assert response.status_code == 403
+
+
+def test_schedule_dependency_create_requires_modify_links_permission():
+    role_permissions = [
+        permission[0]
+        for permission in MEMBERS_PERMISSIONS
+        if permission[0] != "modify_schedule_links"
+    ]
+    project, client = _build_project_client(role_permissions=role_permissions)
+
+    source = factories.create_task(project=project, due_date=date(2026, 1, 10))
+    target = factories.create_task(project=project, due_date=date(2026, 1, 13))
+    source_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        source.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 8),
+        due_date=date(2026, 1, 10),
+    )
+    target_schedule = schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        target.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 11),
+        due_date=date(2026, 1, 13),
+    )
+
+    payload = {
+        "from_schedule": source_schedule.id,
+        "to_schedule": target_schedule.id,
+    }
+    response = client.post(
+        "/api/v1/schedule-dependencies",
+        data=json.dumps(payload),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 403
 
 
 def test_propagation_expands_ancestors_for_shifted_targets_in_dependency_chain():

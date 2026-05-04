@@ -16,18 +16,59 @@ from tests import factories
 pytestmark = pytest.mark.django_db
 
 
-def _build_project_client():
+def _build_project_client(role_permissions=None):
     project = factories.create_project()
     owner = project.owner
+    if role_permissions is None:
+        role_permissions = [permission[0] for permission in MEMBERS_PERMISSIONS]
     role = factories.RoleFactory.create(
         project=project,
-        permissions=[permission[0] for permission in MEMBERS_PERMISSIONS],
+        permissions=role_permissions,
     )
     factories.MembershipFactory.create(project=project, user=owner, role=role)
 
     client = Client()
     client.force_login(owner)
     return project, client
+
+
+def test_bulk_apply_dates_requires_modify_schedule_dates_permission():
+    role_permissions = [
+        permission[0]
+        for permission in MEMBERS_PERMISSIONS
+        if permission[0] != "modify_schedule_dates"
+    ]
+    project, client = _build_project_client(role_permissions=role_permissions)
+
+    task = factories.create_task(project=project, due_date=date(2026, 1, 8))
+    schedule_services.upsert_schedule(
+        schedule_services.ENTITY_TASK,
+        task.id,
+        project_id=project.id,
+        estimated_start=date(2026, 1, 5),
+        due_date=date(2026, 1, 8),
+    )
+
+    payload = {
+        "project_id": project.id,
+        "bulk_updates": [
+            {
+                "entity_type": "task",
+                "entity_id": task.id,
+                "start_field": "estimated_start",
+                "start": "2026-01-10",
+                "due": "2026-01-12",
+            }
+        ],
+    }
+
+    response = client.post(
+        "/api/v1/schedule-dependencies/bulk_apply_dates",
+        data=json.dumps(payload),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 403
 
 
 def test_bulk_apply_dates_updates_schedule_and_due_dates_atomically():

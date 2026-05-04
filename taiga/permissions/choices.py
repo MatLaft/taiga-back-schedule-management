@@ -14,6 +14,8 @@ ANON_PERMISSIONS = [
     ('view_us', _('View user stories')),
     ('view_tasks', _('View tasks')),
     ('view_issues', _('View issues')),
+    ('view_schedule', _('View schedule')),
+    ('view_gantt', _('View gantt')),
     ('view_wiki_pages', _('View wiki pages')),
     ('view_wiki_links', _('View wiki links')),
 ]
@@ -49,6 +51,13 @@ MEMBERS_PERMISSIONS = [
     ('modify_issue', _('Modify issue')),
     ('comment_issue', _('Comment issue')),
     ('delete_issue', _('Delete issue')),
+    # Schedule / Gantt permissions
+    ('view_schedule', _('View schedule')),
+    ('view_gantt', _('View gantt')),
+    ('modify_schedule_links', _('Modify schedule links')),
+    ('modify_schedule_dates', _('Modify schedule expected start dates')),
+    ('modify_schedule_color', _('Modify schedule color')),
+    ('modify_gantt_list_order', _('Modify gantt list order')),
     # Wiki page permissions
     ('view_wiki_pages', _('View wiki pages')),
     ('add_wiki_page', _('Add wiki page')),
