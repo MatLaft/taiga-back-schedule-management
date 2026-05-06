@@ -16,6 +16,7 @@ from taiga.base.api import ModelCrudViewSet, ModelListViewSet
 from taiga.base.api.mixins import ArchivedByProjectMixin, BlockedByProjectMixin
 from taiga.base.api.viewsets import NestedViewSetMixin
 from taiga.base.utils import json
+from taiga.permissions import services as permissions_service
 
 from taiga.projects.history.mixins import HistoryResourceMixin
 from taiga.projects.mixins.by_ref import ByRefMixin
@@ -148,8 +149,48 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
         if item_order is not None:
             setattr(obj, "schedule_position", item_order.position)
 
+    def _is_schedule_context(self):
+        return "include_schedule" in self.request.QUERY_PARAMS
+
+    def _check_schedule_write_permissions(self, obj):
+        if not self._is_schedule_context():
+            return
+
+        project = obj.project
+
+        if (
+            "position" in self.request.DATA
+            and not permissions_service.user_has_perm(
+                self.request.user, "modify_gantt_list_order", project
+            )
+        ):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify gantt list order.")
+            )
+
+        if (
+            "color" in self.request.DATA
+            and not permissions_service.user_has_perm(
+                self.request.user, "modify_schedule_color", project
+            )
+        ):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify schedule color.")
+            )
+
+        if (
+            any(field in self.request.DATA for field in ("due_date", "estimated_start", "actual_start"))
+            and not permissions_service.user_has_perm(
+                self.request.user, "modify_schedule_dates", project
+            )
+        ):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify schedule dates.")
+            )
+
     def pre_save(self, obj):
         self._requested_schedule_position = self._get_requested_schedule_position()
+        self._check_schedule_write_permissions(obj)
 
         if not obj.id:
             obj.owner = self.request.user
