@@ -199,6 +199,8 @@ class Project(ProjectDefaults, TaggedMixin, TagsColorsMixin, models.Model):
                                                verbose_name=_("active backlog panel"))
     is_kanban_activated = models.BooleanField(default=False, null=False, blank=True,
                                               verbose_name=_("active kanban panel"))
+    is_schedule_activated = models.BooleanField(default=True, null=False, blank=True,
+                                                verbose_name=_("active schedule and gantt panels"))
     is_wiki_activated = models.BooleanField(default=True, null=False, blank=True,
                                             verbose_name=_("active wiki panel"))
     is_issues_activated = models.BooleanField(default=True, null=False, blank=True,
@@ -1011,6 +1013,8 @@ class ProjectTemplate(TaggedMixin, TagsColorsMixin, models.Model):
                                                verbose_name=_("active backlog panel"))
     is_kanban_activated = models.BooleanField(default=False, null=False, blank=True,
                                               verbose_name=_("active kanban panel"))
+    is_schedule_activated = models.BooleanField(default=True, null=False, blank=True,
+                                                verbose_name=_("active schedule and gantt panels"))
     is_wiki_activated = models.BooleanField(default=True, null=False, blank=True,
                                             verbose_name=_("active wiki panel"))
     is_issues_activated = models.BooleanField(default=True, null=False, blank=True,
@@ -1068,6 +1072,7 @@ class ProjectTemplate(TaggedMixin, TagsColorsMixin, models.Model):
         self.is_epics_activated = project.is_epics_activated
         self.is_backlog_activated = project.is_backlog_activated
         self.is_kanban_activated = project.is_kanban_activated
+        self.is_schedule_activated = project.is_schedule_activated
         self.is_wiki_activated = project.is_wiki_activated
         self.is_issues_activated = project.is_issues_activated
         self.videoconferences = project.videoconferences
@@ -1256,6 +1261,7 @@ class ProjectTemplate(TaggedMixin, TagsColorsMixin, models.Model):
         project.is_epics_activated = self.is_epics_activated
         project.is_backlog_activated = self.is_backlog_activated
         project.is_kanban_activated = self.is_kanban_activated
+        project.is_schedule_activated = self.is_schedule_activated
         project.is_wiki_activated = self.is_wiki_activated
         project.is_issues_activated = self.is_issues_activated
         project.videoconferences = self.videoconferences

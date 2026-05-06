@@ -2199,7 +2199,7 @@ def test_duplicate_project(client):
 
     attributes = [
         "is_epics_activated", "is_backlog_activated", "is_kanban_activated", "is_wiki_activated",
-        "is_issues_activated", "videoconferences", "videoconferences_extra_data",
+        "is_schedule_activated", "is_issues_activated", "videoconferences", "videoconferences_extra_data",
         "is_looking_for_people", "looking_for_people_note", "is_private"
     ]
 

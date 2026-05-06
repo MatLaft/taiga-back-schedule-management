@@ -271,6 +271,7 @@ def project_freezer(project) -> dict:
               "is_epics_activated",
               "is_backlog_activated",
               "is_kanban_activated",
+              "is_schedule_activated",
               "is_wiki_activated",
               "is_issues_activated")
     return _generic_extract(project, fields)

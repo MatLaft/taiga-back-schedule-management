@@ -101,6 +101,7 @@ class ProjectAdmin(admin.ModelAdmin):
             "classes": ("collapse",),
             "fields": (("is_backlog_activated", "total_milestones", "total_story_points"),
                        "is_kanban_activated",
+                       "is_schedule_activated",
                        "is_issues_activated",
                        "is_wiki_activated",
                        ("videoconferences", "videoconferences_extra_data")),
