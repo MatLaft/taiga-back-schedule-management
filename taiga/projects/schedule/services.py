@@ -446,8 +446,6 @@ def upsert_schedule(
     due_date=_UNSET,
     estimated_start=_UNSET,
     actual_start=_UNSET,
-    estimated_hours=_UNSET,
-    actual_hours=_UNSET,
     color=_UNSET,
 ):
     _assert_entity_type(entity_type)
@@ -471,10 +469,6 @@ def upsert_schedule(
         updates["estimated_start"] = estimated_start
     if actual_start is not _UNSET:
         updates["actual_start"] = actual_start
-    if estimated_hours is not _UNSET:
-        updates["estimated_hours"] = estimated_hours
-    if actual_hours is not _UNSET:
-        updates["actual_hours"] = actual_hours
     if color is not _UNSET:
         updates["color"] = color
 

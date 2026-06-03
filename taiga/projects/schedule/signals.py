@@ -24,12 +24,6 @@ def _task_post_save(sender, instance, created, **kwargs):
     if hasattr(instance, "actual_start"):
         data["actual_start"] = instance.actual_start
 
-    if hasattr(instance, "estimated_hours"):
-        data["estimated_hours"] = instance.estimated_hours
-
-    if hasattr(instance, "actual_hours"):
-        data["actual_hours"] = instance.actual_hours
-
     inherited_color = None
     if getattr(instance, "user_story_id", None):
         inherited_color = services.get_primary_epic_color_for_userstory(instance.user_story_id)
@@ -64,12 +58,6 @@ def _userstory_post_save(sender, instance, created, **kwargs):
     if hasattr(instance, "actual_start"):
         data["actual_start"] = instance.actual_start
 
-    if hasattr(instance, "estimated_hours"):
-        data["estimated_hours"] = instance.estimated_hours
-
-    if hasattr(instance, "actual_hours"):
-        data["actual_hours"] = instance.actual_hours
-
     inherited_color = services.get_primary_epic_color_for_userstory(instance.id)
     if inherited_color is not None:
         data["color"] = inherited_color
@@ -100,12 +88,6 @@ def _epic_post_save(sender, instance, created, **kwargs):
 
     if hasattr(instance, "actual_start"):
         data["actual_start"] = instance.actual_start
-
-    if hasattr(instance, "estimated_hours"):
-        data["estimated_hours"] = instance.estimated_hours
-
-    if hasattr(instance, "actual_hours"):
-        data["actual_hours"] = instance.actual_hours
 
     services.upsert_schedule(services.ENTITY_EPIC, instance.id, **data)
     services.sync_epic_related_schedule_colors(instance.id)

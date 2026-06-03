@@ -36,8 +36,6 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
     due_date = MethodField()
     estimated_start = MethodField()
     actual_start = MethodField()
-    estimated_hours = MethodField()
-    actual_hours = MethodField()
     subject = Field()
     color = Field()
     epics_order = Field()
@@ -71,12 +69,6 @@ class EpicListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     def get_actual_start(self, obj):
         return getattr(obj, "schedule_actual_start", None)
-
-    def get_estimated_hours(self, obj):
-        return getattr(obj, "schedule_estimated_hours", None)
-
-    def get_actual_hours(self, obj):
-        return getattr(obj, "schedule_actual_hours", None)
 
 
 class EpicSerializer(EpicListSerializer):

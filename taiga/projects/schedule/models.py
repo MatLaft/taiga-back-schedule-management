@@ -38,22 +38,6 @@ class Schedule(models.Model):
     actual_start = models.DateField(
         null=True, blank=True, default=None, verbose_name=_("actual start date")
     )
-    estimated_hours = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        default=None,
-        verbose_name=_("estimated hours"),
-    )
-    actual_hours = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        default=None,
-        verbose_name=_("actual hours"),
-    )
     color = models.CharField(
         max_length=32,
         null=True,

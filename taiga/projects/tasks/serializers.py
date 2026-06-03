@@ -42,8 +42,6 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
     finished_date = Field()
     estimated_start = MethodField()
     actual_start = MethodField()
-    estimated_hours = MethodField()
-    actual_hours = MethodField()
     color = MethodField()
     subject = Field()
     us_order = Field()
@@ -79,12 +77,6 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     def get_actual_start(self, obj):
         return getattr(obj, "schedule_actual_start", None)
-
-    def get_estimated_hours(self, obj):
-        return getattr(obj, "schedule_estimated_hours", None)
-
-    def get_actual_hours(self, obj):
-        return getattr(obj, "schedule_actual_hours", None)
 
     def get_color(self, obj):
         return getattr(obj, "schedule_color", None)

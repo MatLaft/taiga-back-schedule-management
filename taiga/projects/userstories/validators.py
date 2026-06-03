@@ -52,8 +52,6 @@ class UserStoryValidator(AssignedToValidator, WatchersValidator,
     points = RolePointsField(source="role_points", required=False)
     estimated_start = serializers.DateField(required=False)
     actual_start = serializers.DateField(required=False)
-    estimated_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
-    actual_hours = serializers.DecimalField(required=False, max_digits=10, decimal_places=2)
     color = serializers.CharField(required=False)
     position = serializers.IntegerField(required=False, min_value=1)
 
