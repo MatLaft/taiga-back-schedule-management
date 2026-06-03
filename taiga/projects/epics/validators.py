@@ -33,8 +33,6 @@ class EpicValidator(AssignedToValidator, WatchersValidator, EditableWatchedResou
     tags = TagsAndTagsColorsField(default=[], required=False)
     external_reference = PgArrayField(required=False)
     due_date = serializers.DateField(required=False)
-    estimated_start = serializers.DateField(required=False)
-    actual_start = serializers.DateField(required=False)
     position = serializers.IntegerField(required=False, min_value=1)
 
     class Meta:

@@ -45,3 +45,24 @@ class ScheduleBulkApplyDatesValidator(validators.Validator):
             raise ValidationError("At least one bulk update is required.")
 
         return attrs
+
+
+class ScheduleItemDatesValidator(validators.Validator):
+    project = serializers.IntegerField(min_value=1)
+    entity_type = serializers.ChoiceField(
+        choices=(
+            (models.Schedule.TYPE_EPIC, models.Schedule.TYPE_EPIC),
+            (models.Schedule.TYPE_USERSTORY, models.Schedule.TYPE_USERSTORY),
+            (models.Schedule.TYPE_TASK, models.Schedule.TYPE_TASK),
+        )
+    )
+    entity_id = serializers.IntegerField(min_value=1)
+    estimated_start = serializers.DateField(required=False)
+    actual_start = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        if "estimated_start" not in attrs and "actual_start" not in attrs:
+            raise ValidationError(
+                "At least one of 'estimated_start' or 'actual_start' is required."
+            )
+        return attrs

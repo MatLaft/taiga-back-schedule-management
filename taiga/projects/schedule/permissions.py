@@ -16,3 +16,7 @@ class ScheduleDependencyPermission(TaigaResourcePermission):
     destroy_perms = IsAuthenticated()
     list_perms = IsAuthenticated()
     bulk_apply_dates_perms = IsAuthenticated()
+
+
+class ScheduleItemPermission(TaigaResourcePermission):
+    update_dates_perms = IsAuthenticated()

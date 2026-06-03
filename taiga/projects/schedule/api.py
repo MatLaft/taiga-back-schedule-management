@@ -12,15 +12,25 @@ from taiga.base import exceptions as exc
 from taiga.base import filters as base_filters
 from taiga.base import response
 from taiga.base.decorators import list_route
-from taiga.base.api import ModelCrudViewSet
+from taiga.base.api import ModelCrudViewSet, GenericViewSet
 from taiga.permissions import services as permissions_service
 from taiga.projects.models import Project
+from taiga.projects.epics.models import Epic
+from taiga.projects.userstories.models import UserStory
+from taiga.projects.tasks.models import Task
 
 from . import models
 from . import permissions
 from . import serializers
 from . import services
 from . import validators
+
+
+_ENTITY_MODEL_MAP = {
+    models.Schedule.TYPE_EPIC: Epic,
+    models.Schedule.TYPE_USERSTORY: UserStory,
+    models.Schedule.TYPE_TASK: Task,
+}
 
 
 class ScheduleDependencyViewSet(ModelCrudViewSet):
@@ -165,3 +175,91 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
             raise exc.WrongArguments(str(err))
 
         return response.Ok({"updated": len(normalized_updates)})
+
+
+class ScheduleItemViewSet(GenericViewSet):
+    permission_classes = (permissions.ScheduleItemPermission,)
+
+    def _user_can_view_project(self, project_id):
+        filter_expression = base_filters.get_filter_expression_can_view_projects(
+            self.request.user, project_id=project_id
+        )
+        return Project.objects.filter(id=project_id).filter(filter_expression).exists()
+
+    def _user_can_view_schedule_pages(self, project):
+        return (
+            permissions_service.user_has_perm(self.request.user, "view_schedule", project)
+            or permissions_service.user_has_perm(self.request.user, "view_gantt", project)
+        )
+
+    def _resolve_entity(self, entity_type, entity_id, project_id):
+        model = _ENTITY_MODEL_MAP[entity_type]
+        try:
+            entity = model.objects.get(id=entity_id, project_id=project_id)
+        except model.DoesNotExist:
+            raise exc.WrongArguments(
+                _("Entity not found in the given project.")
+            )
+        return entity
+
+    @list_route(methods=["POST"])
+    def update_dates(self, request, **kwargs):
+        validator = validators.ScheduleItemDatesValidator(data=request.DATA)
+        if not validator.is_valid():
+            return response.BadRequest(validator.errors)
+
+        data = validator.object
+        project_id = data["project"]
+        entity_type = data["entity_type"]
+        entity_id = data["entity_id"]
+
+        project = Project.objects.filter(id=project_id).first()
+        if project is None:
+            raise exc.WrongArguments(_("The project doesn't exist."))
+
+        if not self._user_can_view_project(project_id):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to access this project.")
+            )
+
+        if not self._user_can_view_schedule_pages(project):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to access schedule or gantt data.")
+            )
+
+        if not permissions_service.user_has_perm(
+            self.request.user, "modify_schedule_dates", project
+        ):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify schedule dates.")
+            )
+
+        # Validates that the entity exists in the project. Avoids letting a
+        # caller create an orphan Schedule row by upserting against a bogus id.
+        entity = self._resolve_entity(entity_type, entity_id, project_id)
+
+        upsert_kwargs = {"project_id": project_id}
+        if "estimated_start" in data:
+            upsert_kwargs["estimated_start"] = data["estimated_start"]
+        if "actual_start" in data:
+            upsert_kwargs["actual_start"] = data["actual_start"]
+
+        schedule = services.upsert_schedule(entity_type, entity_id, **upsert_kwargs)
+        services.propagate_dependency_chain_forward(entity_type, entity_id)
+
+        if entity_type == models.Schedule.TYPE_TASK:
+            services.ensure_userstory_and_epic_bounds_from_task(
+                entity_id, getattr(entity, "user_story_id", None)
+            )
+        elif entity_type == models.Schedule.TYPE_USERSTORY:
+            services.ensure_epic_bounds_for_userstory(entity_id)
+
+        payload = {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "project": project_id,
+            "estimated_start": schedule.estimated_start if schedule else None,
+            "actual_start": schedule.actual_start if schedule else None,
+            "due_date": schedule.due_date if schedule else None,
+        }
+        return response.Ok(payload)

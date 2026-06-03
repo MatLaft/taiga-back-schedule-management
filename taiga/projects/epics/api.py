@@ -177,7 +177,7 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
             )
 
         if (
-            any(field in self.request.DATA for field in ("due_date", "estimated_start", "actual_start"))
+            "due_date" in self.request.DATA
             and not permissions_service.user_has_perm(
                 self.request.user, "modify_schedule_dates", project
             )
