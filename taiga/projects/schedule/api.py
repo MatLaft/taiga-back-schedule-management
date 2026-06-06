@@ -180,6 +180,15 @@ class ScheduleDependencyViewSet(ModelCrudViewSet):
 class ScheduleItemViewSet(GenericViewSet):
     permission_classes = (permissions.ScheduleItemPermission,)
 
+    def _normalize_project_id(self, raw_project_id):
+        if raw_project_id is None:
+            return None
+
+        try:
+            return int(raw_project_id)
+        except (TypeError, ValueError):
+            raise exc.BadRequest(_("'project' must be an integer value."))
+
     def _user_can_view_project(self, project_id):
         filter_expression = base_filters.get_filter_expression_can_view_projects(
             self.request.user, project_id=project_id
@@ -192,26 +201,30 @@ class ScheduleItemViewSet(GenericViewSet):
             or permissions_service.user_has_perm(self.request.user, "view_gantt", project)
         )
 
-    def _resolve_entity(self, entity_type, entity_id, project_id):
-        model = _ENTITY_MODEL_MAP[entity_type]
-        try:
-            entity = model.objects.get(id=entity_id, project_id=project_id)
-        except model.DoesNotExist:
-            raise exc.WrongArguments(
-                _("Entity not found in the given project.")
-            )
-        return entity
+    def _user_can_modify_schedule_dates(self, project):
+        return permissions_service.user_has_perm(
+            self.request.user, "modify_schedule_dates", project
+        )
 
-    @list_route(methods=["POST"])
-    def update_dates(self, request, **kwargs):
-        validator = validators.ScheduleItemDatesValidator(data=request.DATA)
-        if not validator.is_valid():
-            return response.BadRequest(validator.errors)
+    def _user_can_modify_schedule_color(self, project):
+        return permissions_service.user_has_perm(
+            self.request.user, "modify_schedule_color", project
+        )
 
-        data = validator.object
-        project_id = data["project"]
-        entity_type = data["entity_type"]
-        entity_id = data["entity_id"]
+    def _user_can_modify_schedule_position(self, project):
+        return permissions_service.user_has_perm(
+            self.request.user, "modify_gantt_list_order", project
+        )
+
+    def _check_project_access(
+        self,
+        project_id,
+        for_dates_write=False,
+        for_color_write=False,
+        for_position_write=False,
+    ):
+        if project_id is None:
+            raise exc.WrongArguments(_("Project is required."))
 
         project = Project.objects.filter(id=project_id).first()
         if project is None:
@@ -227,39 +240,148 @@ class ScheduleItemViewSet(GenericViewSet):
                 _("You don't have permissions to access schedule or gantt data.")
             )
 
-        if not permissions_service.user_has_perm(
-            self.request.user, "modify_schedule_dates", project
-        ):
+        if for_dates_write and not self._user_can_modify_schedule_dates(project):
             raise exc.PermissionDenied(
                 _("You don't have permissions to modify schedule dates.")
             )
 
-        # Validates that the entity exists in the project. Avoids letting a
-        # caller create an orphan Schedule row by upserting against a bogus id.
-        entity = self._resolve_entity(entity_type, entity_id, project_id)
-
-        upsert_kwargs = {"project_id": project_id}
-        if "estimated_start" in data:
-            upsert_kwargs["estimated_start"] = data["estimated_start"]
-        if "actual_start" in data:
-            upsert_kwargs["actual_start"] = data["actual_start"]
-
-        schedule = services.upsert_schedule(entity_type, entity_id, **upsert_kwargs)
-        services.propagate_dependency_chain_forward(entity_type, entity_id)
-
-        if entity_type == models.Schedule.TYPE_TASK:
-            services.ensure_userstory_and_epic_bounds_from_task(
-                entity_id, getattr(entity, "user_story_id", None)
+        if for_color_write and not self._user_can_modify_schedule_color(project):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify schedule color.")
             )
-        elif entity_type == models.Schedule.TYPE_USERSTORY:
-            services.ensure_epic_bounds_for_userstory(entity_id)
 
-        payload = {
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "project": project_id,
-            "estimated_start": schedule.estimated_start if schedule else None,
-            "actual_start": schedule.actual_start if schedule else None,
-            "due_date": schedule.due_date if schedule else None,
+        if for_position_write and not self._user_can_modify_schedule_position(project):
+            raise exc.PermissionDenied(
+                _("You don't have permissions to modify gantt list order.")
+            )
+
+        return project
+
+    def _resolve_entity(self, entity_type, entity_id, project_id):
+        model = _ENTITY_MODEL_MAP[entity_type]
+        try:
+            entity = model.objects.get(id=entity_id, project_id=project_id)
+        except model.DoesNotExist:
+            raise exc.WrongArguments(
+                _("Entity not found in the given project.")
+            )
+        return entity
+
+    def list(self, request, *args, **kwargs):
+        project_id = self._normalize_project_id(request.QUERY_PARAMS.get("project"))
+        self._check_project_access(project_id)
+
+        queryset = (
+            models.Schedule.objects
+            .select_related("item_order")
+            .filter(project_id=project_id)
+            .order_by("entity_type", "entity_id")
+        )
+        serializer = serializers.ScheduleItemSerializer(queryset, many=True)
+        return response.Ok(serializer.data)
+
+    def _build_schedule_date_updates(self, data):
+        updates = []
+        base_update = {
+            "entity_type": data["entity_type"],
+            "entity_id": data["entity_id"],
         }
-        return response.Ok(payload)
+
+        if "estimated_start" in data:
+            update = dict(base_update)
+            update["start_field"] = "estimated_start"
+            update["start"] = data["estimated_start"]
+            updates.append(update)
+
+        if "actual_start" in data:
+            update = dict(base_update)
+            update["start_field"] = "actual_start"
+            update["start"] = data["actual_start"]
+            updates.append(update)
+
+        if "due_date" in data:
+            if updates:
+                updates[0]["due"] = data["due_date"]
+            else:
+                update = dict(base_update)
+                update["due"] = data["due_date"]
+                updates.append(update)
+
+        return updates
+
+    def _get_schedule_for_response(self, entity_type, entity_id):
+        return (
+            models.Schedule.objects
+            .select_related("item_order")
+            .filter(entity_type=entity_type, entity_id=entity_id)
+            .first()
+        )
+
+    def _serialize_schedule_item(self, entity_type, entity_id):
+        schedule = self._get_schedule_for_response(entity_type, entity_id)
+        if schedule is None:
+            return {}
+
+        serializer = serializers.ScheduleItemSerializer(schedule)
+        return serializer.data
+
+    def _update_schedule_item_from_data(self, data):
+        project_id = data["project"]
+        entity_type = data["entity_type"]
+        entity_id = data["entity_id"]
+
+        self._check_project_access(
+            project_id,
+            for_dates_write=(
+                "due_date" in data
+                or "estimated_start" in data
+                or "actual_start" in data
+            ),
+            for_color_write=("color" in data),
+            for_position_write=("position" in data),
+        )
+        self._resolve_entity(entity_type, entity_id, project_id)
+
+        with advisory_lock(
+            "schedule-item-update-{}-{}-{}".format(project_id, entity_type, entity_id)
+        ):
+            date_updates = self._build_schedule_date_updates(data)
+            if date_updates:
+                try:
+                    for date_update in date_updates:
+                        services.apply_schedule_dates_in_bulk(project_id, [date_update])
+                except ValueError as err:
+                    raise exc.WrongArguments(str(err))
+
+            if "color" in data:
+                try:
+                    services.update_schedule_color(
+                        entity_type,
+                        entity_id,
+                        project_id,
+                        data["color"],
+                    )
+                except ValueError as err:
+                    raise exc.WrongArguments(str(err))
+
+            if "position" in data:
+                services.upsert_schedule(
+                    entity_type,
+                    entity_id,
+                    project_id=project_id,
+                )
+                services.set_schedule_item_order_position(
+                    entity_type,
+                    entity_id,
+                    data["position"],
+                )
+
+        return self._serialize_schedule_item(entity_type, entity_id)
+
+    @list_route(methods=["POST"])
+    def update_item(self, request, **kwargs):
+        validator = validators.ScheduleItemUpdateValidator(data=request.DATA)
+        if not validator.is_valid():
+            return response.BadRequest(validator.errors)
+
+        return response.Ok(self._update_schedule_item_from_data(validator.object))

@@ -24,7 +24,6 @@ from taiga.base.api.utils import get_object_or_error
 from taiga.base.utils import json
 from taiga.base.utils.db import get_object_or_none
 
-from taiga.permissions import services as permissions_service
 from taiga.projects.history.mixins import HistoryResourceMixin
 from taiga.projects.history.services import take_snapshot
 from taiga.projects.milestones.models import Milestone
@@ -34,7 +33,6 @@ from taiga.projects.notifications.mixins import AssignedUsersSignalMixin
 from taiga.projects.notifications.mixins import WatchedResourceMixin
 from taiga.projects.notifications.mixins import WatchersViewSetMixin
 from taiga.projects.occ import OCCResourceMixin
-from taiga.projects.schedule import services as schedule_services
 from taiga.projects.tagging.api import TaggedResourceMixin
 from taiga.projects.votes.mixins.viewsets import VotedResourceMixin
 from taiga.projects.votes.mixins.viewsets import VotersViewSetMixin
@@ -140,18 +138,6 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
                                include_tasks=include_tasks,
                                epic_id=epic_id)
 
-        if "include_schedule" in self.request.QUERY_PARAMS:
-            qs = schedule_services.attach_schedule_fields(
-                qs,
-                schedule_services.ENTITY_USERSTORY,
-                (
-                    "id",
-                    "estimated_start",
-                    "actual_start",
-                    "color",
-                    "position",
-                ),
-            )
         return qs
 
     # Updating some attributes of the userstory can affect the ordering in the backlog, kanban or taskboard
@@ -165,75 +151,6 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
 
     def _sprint_order_key(self, obj):
         return f"{obj.project_id}-{obj.milestone_id}-{obj.sprint_order}"
-
-    def _get_requested_schedule_position(self):
-        raw_position = self.request.DATA.get("position", None)
-        if raw_position is None:
-            return None
-
-        try:
-            position = int(raw_position)
-        except (TypeError, ValueError):
-            raise exc.WrongArguments(_("'position' must be an integer value."))
-
-        if position < 1:
-            raise exc.WrongArguments(
-                _("The schedule order position must be greater than zero.")
-            )
-
-        return position
-
-    def _persist_schedule_position_if_needed(self, obj):
-        requested_position = getattr(self, "_requested_schedule_position", None)
-        if requested_position is None:
-            return
-
-        item_order = schedule_services.set_schedule_item_order_position(
-            schedule_services.ENTITY_USERSTORY,
-            obj.id,
-            requested_position,
-        )
-        if item_order is not None:
-            setattr(obj, "schedule_position", item_order.position)
-
-    def _is_schedule_context(self):
-        return "include_schedule" in self.request.QUERY_PARAMS
-
-    def _check_schedule_write_permissions(self, obj):
-        if not self._is_schedule_context():
-            return
-
-        project = obj.project
-
-        if (
-            "position" in self.request.DATA
-            and not permissions_service.user_has_perm(
-                self.request.user, "modify_gantt_list_order", project
-            )
-        ):
-            raise exc.PermissionDenied(
-                _("You don't have permissions to modify gantt list order.")
-            )
-
-        if (
-            "color" in self.request.DATA
-            and not permissions_service.user_has_perm(
-                self.request.user, "modify_schedule_color", project
-            )
-        ):
-            raise exc.PermissionDenied(
-                _("You don't have permissions to modify schedule color.")
-            )
-
-        if (
-            "due_date" in self.request.DATA
-            and not permissions_service.user_has_perm(
-                self.request.user, "modify_schedule_dates", project
-            )
-        ):
-            raise exc.PermissionDenied(
-                _("You don't have permissions to modify schedule dates.")
-            )
 
     def _add_taiga_info_headers(self):
         try:
@@ -282,28 +199,7 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
             raise exc.PermissionDenied(_("You don't have permissions to set this swimlane "
                                          "to this user story."))
 
-        bounds_error = schedule_services.get_userstory_bounds_violation_error(obj)
-        if bounds_error:
-            raise exc.WrongArguments(bounds_error)
-
-        dependency_error = schedule_services.get_dependency_start_violation_error(
-            obj,
-            schedule_services.ENTITY_USERSTORY,
-        )
-        if dependency_error:
-            raise exc.WrongArguments(dependency_error)
-
-        ancestor_dependency_error = schedule_services.get_ancestor_dependency_start_violation_error(
-            obj,
-            schedule_services.ENTITY_USERSTORY,
-        )
-        if ancestor_dependency_error:
-            raise exc.WrongArguments(ancestor_dependency_error)
-
     def pre_save(self, obj):
-        self._requested_schedule_position = self._get_requested_schedule_position()
-        self._check_schedule_write_permissions(obj)
-
         # ## start-hack-reorder ##
         if obj.id:
             if self._old_kanban_order_key != self._kanban_order_key(self.object):
@@ -340,27 +236,6 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
                                                              status=status,
                                                              milestone=milestone)
         return {}
-
-    def _persist_schedule_color_if_needed(self, obj):
-        if "include_schedule" not in self.request.QUERY_PARAMS:
-            return
-
-        inherited_color = schedule_services.get_primary_epic_color_for_userstory(obj.id)
-        has_explicit_color = "color" in self.request.DATA
-
-        if inherited_color is not None:
-            color = inherited_color
-        elif has_explicit_color:
-            color = self.request.DATA.get("color")
-        else:
-            return
-
-        schedule_services.upsert_schedule(
-            schedule_services.ENTITY_USERSTORY,
-            obj.id,
-            project_id=obj.project_id,
-            color=color,
-        )
 
     def post_save(self, obj, created=False):
         # ## start-hack-reorder ##
@@ -409,9 +284,6 @@ class UserStoryViewSet(AssignedUsersSignalMixin, OCCResourceMixin,
 
                 role_points.save()
         # ## end-hack-rolepoints ##
-
-        self._persist_schedule_color_if_needed(obj)
-        self._persist_schedule_position_if_needed(obj)
 
         super().post_save(obj, created)
 

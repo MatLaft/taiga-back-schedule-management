@@ -16,14 +16,12 @@ from taiga.base.api import ModelCrudViewSet, ModelListViewSet
 from taiga.base.api.mixins import ArchivedByProjectMixin, BlockedByProjectMixin
 from taiga.base.api.viewsets import NestedViewSetMixin
 from taiga.base.utils import json
-from taiga.permissions import services as permissions_service
 
 from taiga.projects.history.mixins import HistoryResourceMixin
 from taiga.projects.mixins.by_ref import ByRefMixin
 from taiga.projects.models import Project, EpicStatus
 from taiga.projects.notifications.mixins import WatchedResourceMixin, WatchersViewSetMixin
 from taiga.projects.occ import OCCResourceMixin
-from taiga.projects.schedule import services as schedule_services
 from taiga.projects.tagging.api import TaggedResourceMixin
 from taiga.projects.votes.mixins.viewsets import VotedResourceMixin, VotersViewSetMixin
 
@@ -76,19 +74,6 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
         qs = epics_utils.attach_extra_info(qs, user=self.request.user,
                                            include_attachments=include_attachments)
 
-        if "include_schedule" in self.request.QUERY_PARAMS:
-            qs = schedule_services.attach_schedule_fields(
-                qs,
-                schedule_services.ENTITY_EPIC,
-                (
-                    "id",
-                    "due_date",
-                    "estimated_start",
-                    "actual_start",
-                    "position",
-                ),
-            )
-
         return qs
 
     def pre_conditions_on_save(self, obj):
@@ -96,17 +81,6 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
 
         if obj.status and obj.status.project != obj.project:
             raise exc.WrongArguments(_("You don't have permissions to set this status to this epic."))
-
-        bounds_error = schedule_services.get_epic_bounds_violation_error(obj)
-        if bounds_error:
-            raise exc.WrongArguments(bounds_error)
-
-        dependency_error = schedule_services.get_dependency_start_violation_error(
-            obj,
-            schedule_services.ENTITY_EPIC,
-        )
-        if dependency_error:
-            raise exc.WrongArguments(dependency_error)
 
     """
     Updating the epic order attribute can affect the ordering of another epics
@@ -117,79 +91,7 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
     def _epics_order_key(self, obj):
         return "{}-{}".format(obj.project_id, obj.epics_order)
 
-    def _get_requested_schedule_position(self):
-        raw_position = self.request.DATA.get("position", None)
-        if raw_position is None:
-            return None
-
-        try:
-            position = int(raw_position)
-        except (TypeError, ValueError):
-            raise exc.WrongArguments(_("'position' must be an integer value."))
-
-        if position < 1:
-            raise exc.WrongArguments(
-                _("The schedule order position must be greater than zero.")
-            )
-
-        return position
-
-    def _persist_schedule_position_if_needed(self, obj):
-        requested_position = getattr(self, "_requested_schedule_position", None)
-        if requested_position is None:
-            return
-
-        item_order = schedule_services.set_schedule_item_order_position(
-            schedule_services.ENTITY_EPIC,
-            obj.id,
-            requested_position,
-        )
-        if item_order is not None:
-            setattr(obj, "schedule_position", item_order.position)
-
-    def _is_schedule_context(self):
-        return "include_schedule" in self.request.QUERY_PARAMS
-
-    def _check_schedule_write_permissions(self, obj):
-        if not self._is_schedule_context():
-            return
-
-        project = obj.project
-
-        if (
-            "position" in self.request.DATA
-            and not permissions_service.user_has_perm(
-                self.request.user, "modify_gantt_list_order", project
-            )
-        ):
-            raise exc.PermissionDenied(
-                _("You don't have permissions to modify gantt list order.")
-            )
-
-        if (
-            "color" in self.request.DATA
-            and not permissions_service.user_has_perm(
-                self.request.user, "modify_schedule_color", project
-            )
-        ):
-            raise exc.PermissionDenied(
-                _("You don't have permissions to modify schedule color.")
-            )
-
-        if (
-            "due_date" in self.request.DATA
-            and not permissions_service.user_has_perm(
-                self.request.user, "modify_schedule_dates", project
-            )
-        ):
-            raise exc.PermissionDenied(
-                _("You don't have permissions to modify schedule dates.")
-            )
-
     def pre_save(self, obj):
-        self._requested_schedule_position = self._get_requested_schedule_position()
-        self._check_schedule_write_permissions(obj)
-
         if not obj.id:
             obj.owner = self.request.user
         else:
@@ -216,8 +118,6 @@ class EpicViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, Wa
                                                      self._old_epics_order_key,
                                                      self._epics_order_key(obj))
             self.headers["Taiga-Info-Order-Updated"] = json.dumps(orders_updated)
-
-        self._persist_schedule_position_if_needed(obj)
 
         super().post_save(obj, created)
 

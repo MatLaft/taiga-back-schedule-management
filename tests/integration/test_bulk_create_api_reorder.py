@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Test: bulk-create userstories via API, then reorder via PATCH with position attribute.
+# Test: bulk-create userstories via API, then reorder via schedule-items position.
 
 import pytest
 import json
@@ -41,7 +41,7 @@ def test_api_patch_reorder_after_bulk_create():
     """
     Simulate the exact API call made by the Gantt frontend:
     1. Bulk-create userstories under epic (via service)
-    2. PATCH /api/v1/userstories/{id}?include_schedule=true with `position` attribute
+    2. POST /api/v1/schedule-items/update_item with `position` attribute
     """
     project = factories.create_project()
     owner = project.owner
@@ -81,31 +81,21 @@ def test_api_patch_reorder_after_bulk_create():
     assert len(positions_after_bulk) == 3
     assert [p for _, p in positions_after_bulk] == [1, 2, 3]
 
-    # Now simulate what the Gantt frontend does: PATCH to reorder
+    # Now simulate what the Gantt frontend does: schedule item update to reorder
     last_us_id = positions_after_bulk[2][0]
-    first_us_id = positions_after_bulk[0][0]
 
     client = Client()
     client.force_login(owner)
 
-    # First, load the userstory to get its version and schedule_position
-    get_response = client.get(
-        f"/api/v1/userstories/{last_us_id}",
-        {"include_schedule": "true"},
-        content_type="application/json",
-    )
-    assert get_response.status_code == 200, f"GET failed: {get_response.status_code}"
-    us_data = json.loads(get_response.content)
-    print(f"US {last_us_id} data: version={us_data.get('version')}, schedule_position={us_data.get('schedule_position')}")
-
-    # PATCH to reorder: move last story to position 1
-    patch_data = {
+    update_data = {
+        "project": project.id,
+        "entity_type": "userstory",
+        "entity_id": last_us_id,
         "position": 1,
-        "version": us_data["version"],
     }
-    patch_response = client.patch(
-        f"/api/v1/userstories/{last_us_id}?include_schedule=true",
-        data=json.dumps(patch_data),
+    patch_response = client.post(
+        "/api/v1/schedule-items/update_item",
+        data=json.dumps(update_data),
         content_type="application/json",
     )
     print(f"PATCH response status: {patch_response.status_code}")
@@ -118,7 +108,7 @@ def test_api_patch_reorder_after_bulk_create():
     assert patch_response.status_code == 200, f"PATCH failed: {patch_response.status_code}"
 
     patch_result = json.loads(patch_response.content)
-    print(f"PATCH result schedule_position: {patch_result.get('schedule_position')}")
+    print(f"PATCH result position: {patch_result.get('position')}")
 
     # Check positions after reorder
     positions_after_reorder = _get_group_positions(
@@ -136,7 +126,7 @@ def test_api_patch_reorder_after_bulk_create():
     )
     assert [p for _, p in positions_after_reorder] == [1, 2, 3]
 
-    # Verify the response includes correct schedule_position
-    assert patch_result.get("schedule_position") == 1, (
-        f"Expected schedule_position=1 in response, got {patch_result.get('schedule_position')}"
+    # Verify the response includes correct schedule position
+    assert patch_result.get("position") == 1, (
+        f"Expected position=1 in response, got {patch_result.get('position')}"
     )

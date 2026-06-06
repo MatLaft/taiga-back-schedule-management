@@ -47,7 +47,7 @@ class ScheduleBulkApplyDatesValidator(validators.Validator):
         return attrs
 
 
-class ScheduleItemDatesValidator(validators.Validator):
+class ScheduleItemUpdateValidator(validators.Validator):
     project = serializers.IntegerField(min_value=1)
     entity_type = serializers.ChoiceField(
         choices=(
@@ -57,12 +57,21 @@ class ScheduleItemDatesValidator(validators.Validator):
         )
     )
     entity_id = serializers.IntegerField(min_value=1)
+    position = serializers.IntegerField(required=False, min_value=1)
+    color = serializers.CharField(required=False)
+    due_date = serializers.DateField(required=False)
     estimated_start = serializers.DateField(required=False)
     actual_start = serializers.DateField(required=False)
 
     def validate(self, attrs):
-        if "estimated_start" not in attrs and "actual_start" not in attrs:
-            raise ValidationError(
-                "At least one of 'estimated_start' or 'actual_start' is required."
-            )
+        update_fields = (
+            "position",
+            "color",
+            "due_date",
+            "estimated_start",
+            "actual_start",
+        )
+        if not any(field in attrs for field in update_fields):
+            raise ValidationError("At least one schedule field is required.")
+
         return attrs

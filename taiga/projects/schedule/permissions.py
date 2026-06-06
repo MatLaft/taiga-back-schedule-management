@@ -19,4 +19,5 @@ class ScheduleDependencyPermission(TaigaResourcePermission):
 
 
 class ScheduleItemPermission(TaigaResourcePermission):
-    update_dates_perms = IsAuthenticated()
+    list_perms = IsAuthenticated()
+    update_item_perms = IsAuthenticated()

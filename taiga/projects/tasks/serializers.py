@@ -30,8 +30,6 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
                          serializers.LightSerializer):
 
     id = Field()
-    schedule_id = MethodField()
-    schedule_position = MethodField()
     user_story = Field(attr="user_story_id")
     ref = Field()
     project = Field(attr="project_id")
@@ -40,9 +38,6 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
     created_date = Field()
     modified_date = Field()
     finished_date = Field()
-    estimated_start = MethodField()
-    actual_start = MethodField()
-    color = MethodField()
     subject = Field()
     us_order = Field()
     taskboard_order = Field()
@@ -65,21 +60,6 @@ class TaskListSerializer(VoteResourceSerializerMixin, WatchedResourceSerializer,
 
     def get_is_closed(self, obj):
         return obj.status is not None and obj.status.is_closed
-
-    def get_schedule_id(self, obj):
-        return getattr(obj, "schedule_id", None)
-
-    def get_schedule_position(self, obj):
-        return getattr(obj, "schedule_position", None)
-
-    def get_estimated_start(self, obj):
-        return getattr(obj, "schedule_estimated_start", None)
-
-    def get_actual_start(self, obj):
-        return getattr(obj, "schedule_actual_start", None)
-
-    def get_color(self, obj):
-        return getattr(obj, "schedule_color", None)
 
 
 class TaskSerializer(TaskListSerializer):

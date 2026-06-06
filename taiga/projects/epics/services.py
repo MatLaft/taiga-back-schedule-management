@@ -26,6 +26,7 @@ from taiga.projects.votes.utils import attach_total_voters_to_queryset
 from taiga.projects.notifications.utils import attach_watchers_to_queryset
 
 from . import models
+from . import signals as epic_signals
 
 
 #####################################################
@@ -117,9 +118,13 @@ def create_related_userstories_in_bulk(bulk_data, epic, **additional_fields):
                 models.RelatedUserStory(user_story=userstory, epic=epic)
             )
         db.save_in_bulk(related_userstories)
-        from taiga.projects.schedule import services as schedule_services
 
-        schedule_services.sync_epic_userstories_schedule_item_order_in_bulk(epic.id)
+        epic_signals.related_userstories_bulk_changed.send(
+            sender=models.RelatedUserStory,
+            epic_id=epic.id,
+            project_id=epic.project_id,
+            userstory_ids=[userstory.id for userstory in userstories],
+        )
         project.update_role_points(user_stories=userstories)
     finally:
         connect_userstories_signals()
@@ -158,15 +163,15 @@ def update_epic_related_userstories_order_in_bulk(bulk_data: list, epic: object)
 
         db.update_attr_in_bulk_for_ids(rus_orders, "order", models.RelatedUserStory)
 
-        from taiga.projects.schedule import services as schedule_services
-
-        schedule_services.sync_epic_userstories_schedule_item_order_in_bulk(epic.id)
-
         affected_userstory_ids = {
             item["us_id"] for item in bulk_data if item["us_id"] in rus_conversion
         }
-        for userstory_id in affected_userstory_ids:
-            schedule_services.sync_userstory_and_tasks_schedule_color(userstory_id)
+        epic_signals.related_userstories_bulk_changed.send(
+            sender=models.RelatedUserStory,
+            epic_id=epic.id,
+            project_id=epic.project_id,
+            userstory_ids=list(affected_userstory_ids),
+        )
 
     return rus_orders
 

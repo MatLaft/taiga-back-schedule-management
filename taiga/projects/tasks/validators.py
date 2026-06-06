@@ -27,8 +27,6 @@ class TaskValidator(AssignedToValidator, WatchersValidator, EditableWatchedResou
                     validators.ModelValidator):
     tags = TagsAndTagsColorsField(default=[], required=False)
     external_reference = PgArrayField(required=False)
-    color = serializers.CharField(required=False)
-    position = serializers.IntegerField(required=False, min_value=1)
 
     class Meta:
         model = models.Task

@@ -8,6 +8,8 @@
 from taiga.base.api import serializers
 from taiga.base.fields import Field, MethodField
 
+from . import models
+
 
 class ScheduleDependencySerializer(serializers.LightSerializer):
     id = Field()
@@ -35,3 +37,22 @@ class ScheduleDependencySerializer(serializers.LightSerializer):
         if obj.from_schedule_id:
             return obj.from_schedule.project_id
         return None
+
+
+class ScheduleItemSerializer(serializers.LightSerializer):
+    id = Field()
+    schedule_id = Field(attr="id")
+    entity_type = Field()
+    entity_id = Field()
+    project = Field(attr="project_id")
+    due_date = Field()
+    estimated_start = Field()
+    actual_start = Field()
+    color = Field()
+    position = MethodField()
+
+    def get_position(self, obj):
+        try:
+            return obj.item_order.position
+        except models.ScheduleItemOrder.DoesNotExist:
+            return None

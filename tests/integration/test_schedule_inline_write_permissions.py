@@ -39,9 +39,14 @@ def test_userstory_schedule_position_update_requires_modify_gantt_list_order():
     userstory = factories.create_userstory(project=project, owner=owner)
     factories.RelatedUserStory.create(epic=epic, user_story=userstory, order=1)
 
-    response = client.patch(
-        "/api/v1/userstories/{}?include_schedule=true".format(userstory.id),
-        data=json.dumps({"position": 1, "version": userstory.version}),
+    response = client.post(
+        "/api/v1/schedule-items/update_item",
+        data=json.dumps({
+            "project": project.id,
+            "entity_type": "userstory",
+            "entity_id": userstory.id,
+            "position": 1,
+        }),
         content_type="application/json",
     )
 
@@ -57,9 +62,14 @@ def test_epic_schedule_color_update_requires_modify_schedule_color():
         color="#111111",
     )
 
-    response = client.patch(
-        "/api/v1/epics/{}?include_schedule=true".format(epic.id),
-        data=json.dumps({"color": "#ff0000", "version": epic.version}),
+    response = client.post(
+        "/api/v1/schedule-items/update_item",
+        data=json.dumps({
+            "project": project.id,
+            "entity_type": "epic",
+            "entity_id": epic.id,
+            "color": "#ff0000",
+        }),
         content_type="application/json",
     )
 
@@ -78,9 +88,14 @@ def test_task_schedule_due_date_update_requires_modify_schedule_dates():
         due_date=date(2026, 1, 10),
     )
 
-    response = client.patch(
-        "/api/v1/tasks/{}?include_schedule=true".format(task.id),
-        data=json.dumps({"due_date": "2026-01-15", "version": task.version}),
+    response = client.post(
+        "/api/v1/schedule-items/update_item",
+        data=json.dumps({
+            "project": project.id,
+            "entity_type": "task",
+            "entity_id": task.id,
+            "due_date": "2026-01-15",
+        }),
         content_type="application/json",
     )
 

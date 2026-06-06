@@ -485,68 +485,6 @@ def upsert_schedule(
     return obj
 
 
-def attach_schedule_fields(queryset, entity_type, field_names):
-    _assert_entity_type(entity_type)
-    model = queryset.model
-    model_table = model._meta.db_table
-    schedule_table = Schedule._meta.db_table
-    schedule_item_order_table = ScheduleItemOrder._meta.db_table
-
-    select = {}
-    for field_name in field_names:
-        select_key = "schedule_{}".format(field_name)
-        if field_name == "position":
-            sql = (
-                'SELECT "{schedule_item_order_table}"."position" '
-                'FROM "{schedule_item_order_table}" '
-                'INNER JOIN "{schedule_table}" '
-                'ON "{schedule_table}"."id" = "{schedule_item_order_table}"."schedule_id" '
-                "WHERE "
-                '"{schedule_table}"."entity_type" = \'{entity_type}\' '
-                "AND "
-                '"{schedule_table}"."entity_id" = "{model_table}"."id" '
-                "LIMIT 1"
-            ).format(
-                schedule_item_order_table=schedule_item_order_table,
-                schedule_table=schedule_table,
-                entity_type=entity_type,
-                model_table=model_table,
-            )
-        else:
-            sql = (
-                'SELECT "{schedule_table}"."{field_name}" '
-                'FROM "{schedule_table}" '
-                "WHERE "
-                '"{schedule_table}"."entity_type" = \'{entity_type}\' '
-                "AND "
-                '"{schedule_table}"."entity_id" = "{model_table}"."id" '
-                "LIMIT 1"
-            ).format(
-                schedule_table=schedule_table,
-                field_name=field_name,
-                entity_type=entity_type,
-                model_table=model_table,
-            )
-        select[select_key] = sql
-
-    if select:
-        queryset = queryset.extra(select=select)
-
-    return queryset
-
-
-def get_schedule_field(obj, entity_type, field_name):
-    attr_name = "schedule_{}".format(field_name)
-    if hasattr(obj, attr_name):
-        return getattr(obj, attr_name)
-
-    schedule = get_schedule(entity_type, obj.id)
-    if schedule is None:
-        return None
-
-    return getattr(schedule, field_name)
-
-
 def get_due_date(entity_type, entity_id):
     _assert_entity_type(entity_type)
 
@@ -1282,6 +1220,73 @@ def sync_epic_related_schedule_colors(epic_id):
         sync_userstory_and_tasks_schedule_color(userstory_id)
 
 
+def update_schedule_color(entity_type, entity_id, project_id, color):
+    _assert_entity_type(entity_type)
+    requested_color = color
+
+    try:
+        project_id = int(project_id)
+    except (TypeError, ValueError):
+        raise ValueError(_("Invalid project id for schedule color update."))
+
+    if entity_type == ENTITY_EPIC:
+        epic_model = apps.get_model("epics", "Epic")
+        epic_model.objects.filter(id=entity_id, project_id=project_id).update(color=color)
+        schedule = upsert_schedule(
+            ENTITY_EPIC,
+            entity_id,
+            project_id=project_id,
+            color=color,
+        )
+        sync_epic_related_schedule_colors(entity_id)
+        events.emit_event_for_ids(
+            ids=[entity_id],
+            content_type="epics.epic",
+            projectid=project_id,
+        )
+        return schedule
+
+    if entity_type == ENTITY_USERSTORY:
+        inherited_color = get_primary_epic_color_for_userstory(entity_id)
+
+        schedule = upsert_schedule(
+            ENTITY_USERSTORY,
+            entity_id,
+            project_id=project_id,
+            color=inherited_color if inherited_color is not None else requested_color,
+        )
+        events.emit_event_for_ids(
+            ids=[entity_id],
+            content_type="userstories.userstory",
+            projectid=project_id,
+        )
+        return schedule
+
+    inherited_color = None
+    task_model = apps.get_model("tasks", "Task")
+    user_story_id = (
+        task_model.objects
+        .filter(id=entity_id, project_id=project_id)
+        .values_list("user_story_id", flat=True)
+        .first()
+    )
+    if user_story_id:
+        inherited_color = get_primary_epic_color_for_userstory(user_story_id)
+
+    schedule = upsert_schedule(
+        ENTITY_TASK,
+        entity_id,
+        project_id=project_id,
+        color=inherited_color if inherited_color is not None else requested_color,
+    )
+    events.emit_event_for_ids(
+        ids=[entity_id],
+        content_type="tasks.task",
+        projectid=project_id,
+    )
+    return schedule
+
+
 def _normalize_schedule_bulk_date_updates(bulk_updates):
     normalized_by_key = {}
 
@@ -1307,12 +1312,19 @@ def _normalize_schedule_bulk_date_updates(bulk_updates):
         if start_field not in ("estimated_start", "actual_start"):
             raise ValueError(_("Invalid start field for schedule bulk update."))
 
+        has_start = "start" in update
+        has_due = "due" in update
+        if not has_start and not has_due:
+            raise ValueError(_("At least one schedule date must be provided."))
+
         normalized_by_key[(entity_type, entity_id)] = {
             "entity_type": entity_type,
             "entity_id": entity_id,
             "start_field": start_field,
-            "start": update.get("start"),
-            "due": update.get("due"),
+            "start": update.get("start") if has_start else _UNSET,
+            "due": update.get("due") if has_due else _UNSET,
+            "has_start": has_start,
+            "has_due": has_due,
         }
 
     return sorted(
@@ -1359,14 +1371,14 @@ def _apply_schedule_bulk_updates(project_id, normalized_updates, locked_entities
         start_value = update.get("start")
         due_value = update.get("due")
 
-        schedule_data = {
-            "project_id": project_id,
-            "due_date": due_value,
-            start_field: start_value,
-        }
+        schedule_data = {"project_id": project_id}
+        if update.get("has_due"):
+            schedule_data["due_date"] = due_value
+        if update.get("has_start"):
+            schedule_data[start_field] = start_value
         upsert_schedule(entity_type, entity_id, **schedule_data)
 
-        if entity_type not in (ENTITY_TASK, ENTITY_USERSTORY):
+        if not update.get("has_due") or entity_type not in (ENTITY_TASK, ENTITY_USERSTORY):
             continue
 
         model = _get_model_for_entity_type(entity_type)

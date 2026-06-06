@@ -110,11 +110,20 @@ def _related_userstory_post_delete(sender, instance, **kwargs):
     services.ensure_epic_bounds_for_userstory(instance.user_story_id)
 
 
+def _related_userstories_bulk_changed(sender, epic_id=None, userstory_ids=None, **kwargs):
+    services.sync_epic_userstories_schedule_item_order_in_bulk(epic_id)
+
+    for userstory_id in userstory_ids or []:
+        services.sync_userstory_and_tasks_schedule_color(userstory_id)
+        services.ensure_epic_bounds_for_userstory(userstory_id)
+
+
 def connect_schedule_signals():
     task_model = apps.get_model("tasks", "Task")
     userstory_model = apps.get_model("userstories", "UserStory")
     epic_model = apps.get_model("epics", "Epic")
     related_userstory_model = apps.get_model("epics", "RelatedUserStory")
+    from taiga.projects.epics import signals as epic_signals
 
     signals.post_save.connect(
         _task_post_save,
@@ -158,4 +167,8 @@ def connect_schedule_signals():
         _related_userstory_post_delete,
         sender=related_userstory_model,
         dispatch_uid="schedule_related_userstory_post_delete",
+    )
+    epic_signals.related_userstories_bulk_changed.connect(
+        _related_userstories_bulk_changed,
+        dispatch_uid="schedule_related_userstories_bulk_changed",
     )

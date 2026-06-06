@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Test: Check that the bulk_create API endpoint creates Schedule entries AND
-# that the list API correctly returns schedule_position.
+# that the schedule-items API correctly returns position.
 
 import pytest
 import json
@@ -19,8 +19,8 @@ pytestmark = pytest.mark.django_db
 
 def test_list_api_returns_schedule_position_for_bulk_created_stories():
     """
-    After bulk-creating stories under an epic, the list API should return
-    schedule_position values for these stories.
+    After bulk-creating stories under an epic, schedule-items should return
+    position values for these stories.
     """
     project = factories.create_project()
     owner = project.owner
@@ -55,25 +55,30 @@ def test_list_api_returns_schedule_position_for_bulk_created_stories():
         assert item_order is not None, f"No ScheduleItemOrder for US {us_id}"
         print(f"US {us_id}: ScheduleItemOrder position={item_order.position}, parent_type={item_order.parent_entity_type}, parent_id={item_order.parent_entity_id}")
 
-    # Load via API with include_schedule
+    # Load schedule overlays via API.
     client = Client()
     client.force_login(owner)
 
     response = client.get(
-        "/api/v1/userstories",
-        {"project": project.id, "include_schedule": "true"},
+        "/api/v1/schedule-items",
+        {"project": project.id},
     )
     assert response.status_code == 200
 
-    stories = json.loads(response.content)
-    print(f"\nAPI response ({len(stories)} stories):")
+    schedule_items = json.loads(response.content)
+    stories = [
+        item
+        for item in schedule_items
+        if item["entity_type"] == "userstory" and item["entity_id"] in us_ids
+    ]
+    print(f"\nAPI response ({len(stories)} story schedule items):")
     for story in stories:
-        print(f"  US {story['id']}: schedule_id={story.get('schedule_id')}, schedule_position={story.get('schedule_position')}")
-        assert story.get("schedule_id") is not None, f"US {story['id']} missing schedule_id"
-        assert story.get("schedule_position") is not None, f"US {story['id']} missing schedule_position"
-        assert story["schedule_position"] > 0, f"US {story['id']} has invalid schedule_position"
+        print(f"  US {story['entity_id']}: schedule_id={story.get('schedule_id')}, position={story.get('position')}")
+        assert story.get("schedule_id") is not None, f"US {story['entity_id']} missing schedule_id"
+        assert story.get("position") is not None, f"US {story['entity_id']} missing position"
+        assert story["position"] > 0, f"US {story['entity_id']} has invalid position"
 
     # Verify positions are contiguous and unique
-    positions = sorted([s["schedule_position"] for s in stories])
+    positions = sorted([s["position"] for s in stories])
     assert positions == list(range(1, len(stories) + 1)), f"Expected contiguous positions 1..{len(stories)}, got {positions}"
     print(f"\nAll positions verified: {positions}")

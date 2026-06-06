@@ -38,7 +38,7 @@ def _get_schedule(entity_type, entity_id):
     ).first()
 
 
-def test_update_dates_writes_estimated_start_for_task():
+def test_update_item_writes_estimated_start_for_task():
     project, owner, client = _build_project_client_with_perms(
         _all_perms_except()
     )
@@ -51,7 +51,7 @@ def test_update_dates_writes_estimated_start_for_task():
         "estimated_start": "2026-04-01",
     }
     response = client.post(
-        "/api/v1/schedule-items/update_dates",
+        "/api/v1/schedule-items/update_item",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -66,7 +66,7 @@ def test_update_dates_writes_estimated_start_for_task():
     assert schedule.estimated_start.isoformat() == "2026-04-01"
 
 
-def test_update_dates_writes_actual_start_for_userstory():
+def test_update_item_writes_actual_start_for_userstory():
     project, owner, client = _build_project_client_with_perms(
         _all_perms_except()
     )
@@ -79,7 +79,7 @@ def test_update_dates_writes_actual_start_for_userstory():
         "actual_start": "2026-05-01",
     }
     response = client.post(
-        "/api/v1/schedule-items/update_dates",
+        "/api/v1/schedule-items/update_item",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -89,7 +89,7 @@ def test_update_dates_writes_actual_start_for_userstory():
     assert schedule.actual_start.isoformat() == "2026-05-01"
 
 
-def test_update_dates_requires_modify_schedule_dates_permission():
+def test_update_item_requires_modify_schedule_dates_permission():
     project, owner, client = _build_project_client_with_perms(
         _all_perms_except("modify_schedule_dates")
     )
@@ -102,7 +102,7 @@ def test_update_dates_requires_modify_schedule_dates_permission():
         "estimated_start": "2026-04-01",
     }
     response = client.post(
-        "/api/v1/schedule-items/update_dates",
+        "/api/v1/schedule-items/update_item",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -110,7 +110,7 @@ def test_update_dates_requires_modify_schedule_dates_permission():
     assert response.status_code == 403
 
 
-def test_update_dates_requires_view_schedule_or_view_gantt():
+def test_update_item_requires_view_schedule_or_view_gantt():
     project, owner, client = _build_project_client_with_perms(
         _all_perms_except("view_schedule", "view_gantt")
     )
@@ -123,7 +123,7 @@ def test_update_dates_requires_view_schedule_or_view_gantt():
         "estimated_start": "2026-04-01",
     }
     response = client.post(
-        "/api/v1/schedule-items/update_dates",
+        "/api/v1/schedule-items/update_item",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -131,7 +131,7 @@ def test_update_dates_requires_view_schedule_or_view_gantt():
     assert response.status_code == 403
 
 
-def test_update_dates_rejects_entity_from_other_project():
+def test_update_item_rejects_entity_from_other_project():
     project, owner, client = _build_project_client_with_perms(
         _all_perms_except()
     )
@@ -145,7 +145,7 @@ def test_update_dates_rejects_entity_from_other_project():
         "estimated_start": "2026-04-01",
     }
     response = client.post(
-        "/api/v1/schedule-items/update_dates",
+        "/api/v1/schedule-items/update_item",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -153,7 +153,7 @@ def test_update_dates_rejects_entity_from_other_project():
     assert response.status_code in (400, 404)
 
 
-def test_update_dates_requires_at_least_one_date_field():
+def test_update_item_requires_at_least_one_schedule_field():
     project, owner, client = _build_project_client_with_perms(
         _all_perms_except()
     )
@@ -165,7 +165,7 @@ def test_update_dates_requires_at_least_one_date_field():
         "entity_id": task.id,
     }
     response = client.post(
-        "/api/v1/schedule-items/update_dates",
+        "/api/v1/schedule-items/update_item",
         data=json.dumps(payload),
         content_type="application/json",
     )
@@ -181,7 +181,7 @@ def test_core_entity_patch_no_longer_writes_estimated_start():
     task = factories.create_task(project=project, owner=owner)
 
     response = client.patch(
-        "/api/v1/tasks/{}?include_schedule=true".format(task.id),
+        "/api/v1/tasks/{}".format(task.id),
         data=json.dumps({"estimated_start": "2026-04-01", "version": task.version}),
         content_type="application/json",
     )

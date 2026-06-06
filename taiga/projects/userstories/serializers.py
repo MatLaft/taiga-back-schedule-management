@@ -42,8 +42,6 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
         DueDateSerializerMixin, serializers.LightSerializer):
 
     id = Field()
-    schedule_id = MethodField()
-    schedule_position = MethodField()
     ref = Field()
     milestone = Field(attr="milestone_id")
     milestone_slug = MethodField()
@@ -57,9 +55,6 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
     created_date = Field()
     modified_date = Field()
     finish_date = Field()
-    estimated_start = MethodField()
-    actual_start = MethodField()
-    color = MethodField()
     subject = Field()
     client_requirement = Field()
     team_requirement = Field()
@@ -120,21 +115,6 @@ class UserStoryListSerializer(ProjectExtraInfoSerializerMixin,
 
     def get_milestone_name(self, obj):
         return obj.milestone.name if obj.milestone else None
-
-    def get_schedule_id(self, obj):
-        return getattr(obj, "schedule_id", None)
-
-    def get_schedule_position(self, obj):
-        return getattr(obj, "schedule_position", None)
-
-    def get_estimated_start(self, obj):
-        return getattr(obj, "schedule_estimated_start", None)
-
-    def get_actual_start(self, obj):
-        return getattr(obj, "schedule_actual_start", None)
-
-    def get_color(self, obj):
-        return getattr(obj, "schedule_color", None)
 
     def get_total_points(self, obj):
         assert hasattr(obj, "total_points_attr"), "instance must have a total_points_attr attribute"
